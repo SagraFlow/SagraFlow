@@ -2,15 +2,18 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\NormalizesName;
 use Database\Factories\IngredientFactory;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Ingredient extends Model
 {
     /** @use HasFactory<IngredientFactory> */
     use HasFactory;
+
+    use NormalizesName;
 
     protected $fillable = ['name', 'surcharge', 'stock', 'available'];
 
@@ -23,11 +26,10 @@ class Ingredient extends Model
         ];
     }
 
-    protected function name(): Attribute
+    public function foods(): BelongsToMany
     {
-        return Attribute::make(
-            set: fn (string $value) => preg_replace('/\s+/', ' ', trim($value)),
-        );
+        return $this->belongsToMany(Food::class)
+            ->withPivot('quantity', 'min_quantity', 'max_quantity');
     }
 
     public function scopeAvailable($query)

@@ -19,7 +19,6 @@ class CategoryFactory extends Factory
     {
         return [
             'name' => fake()->unique()->word(),
-            'position' => 0,
             'available' => true,
         ];
     }

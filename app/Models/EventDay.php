@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Exceptions\EventDayException;
 use Database\Factories\EventDayFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -24,6 +25,16 @@ class EventDay extends Model
             'opened_at' => 'datetime',
             'closed_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Human-friendly name, e.g. "28/08/2026" or "28/08/2026 (Venerdì)".
+     */
+    protected function displayName(): Attribute
+    {
+        return Attribute::get(
+            fn (): string => $this->date->format('d/m/Y').($this->label ? " ({$this->label})" : ''),
+        );
     }
 
     public function foods(): BelongsToMany

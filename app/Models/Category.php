@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\NormalizesName;
 use Database\Factories\CategoryFactory;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -12,6 +12,8 @@ class Category extends Model
 {
     /** @use HasFactory<CategoryFactory> */
     use HasFactory;
+
+    use NormalizesName;
 
     protected $fillable = ['name', 'position', 'available'];
 
@@ -23,11 +25,13 @@ class Category extends Model
         ];
     }
 
-    protected function name(): Attribute
+    protected static function booted(): void
     {
-        return Attribute::make(
-            set: fn (string $value) => preg_replace('/\s+/', ' ', trim($value)),
-        );
+        static::creating(function (Category $category): void {
+            if ($category->position === null) {
+                $category->position = (static::max('position') ?? 0) + 1;
+            }
+        });
     }
 
     public function foods(): HasMany
