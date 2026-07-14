@@ -14,6 +14,8 @@ class Food extends Model
     /** @use HasFactory<FoodFactory> */
     use HasFactory;
 
+    protected $table = 'foods';
+
     protected $fillable = ['category_id', 'name', 'price', 'available'];
 
     protected function casts(): array
@@ -42,8 +44,29 @@ class Food extends Model
             ->withPivot('quantity', 'min_quantity', 'max_quantity');
     }
 
+    public function eventDays(): BelongsToMany
+    {
+        return $this->belongsToMany(EventDay::class);
+    }
+
     public function scopeAvailable($query)
     {
         return $query->where('available', true);
+    }
+
+    /**
+     * Foods sellable on the given operational day: those with no day
+     * restriction are always sellable, restricted ones only on their days.
+     * A null day matches only unrestricted foods.
+     */
+    public function scopeAvailableOn($query, ?EventDay $day)
+    {
+        return $query->where(function ($query) use ($day) {
+            $query->whereDoesntHave('eventDays');
+
+            if ($day !== null) {
+                $query->orWhereHas('eventDays', fn ($query) => $query->whereKey($day->id));
+            }
+        });
     }
 }

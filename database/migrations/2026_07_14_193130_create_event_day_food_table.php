@@ -11,14 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('food_ingredient', function (Blueprint $table) {
+        Schema::create('event_day_food', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('event_day_id')->constrained()->cascadeOnDelete();
             $table->foreignId('food_id')->constrained('foods')->cascadeOnDelete();
-            $table->foreignId('ingredient_id')->constrained()->cascadeOnDelete();
-            $table->unsignedInteger('quantity')->default(1);
-            $table->unsignedInteger('min_quantity')->default(1);
-            $table->unsignedInteger('max_quantity')->default(1);
-            $table->unique(['food_id', 'ingredient_id']);
+            $table->unique(['event_day_id', 'food_id']);
         });
     }
 
@@ -27,6 +24,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('food_ingredient');
+        Schema::dropIfExists('event_day_food');
     }
 };
