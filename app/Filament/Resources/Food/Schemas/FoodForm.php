@@ -15,8 +15,8 @@ class FoodForm
     {
         return $schema
             ->components([
-                Toggle::make('available')
-                    ->label('Disponibile')
+                Toggle::make('active')
+                    ->label('Attiva')
                     ->default(true)
                     ->columnSpanFull(),
                 TextInput::make('name')

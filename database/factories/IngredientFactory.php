@@ -21,7 +21,7 @@ class IngredientFactory extends Factory
             'name' => fake()->unique()->words(2, true),
             'surcharge' => fake()->randomElement([0, 50, 100, 150]), // centesimi
             'stock' => null,
-            'available' => true,
+            'active' => true,
         ];
     }
 
@@ -30,9 +30,9 @@ class IngredientFactory extends Factory
         return $this->state(fn () => ['stock' => $stock]);
     }
 
-    public function unavailable(): static
+    public function inactive(): static
     {
-        return $this->state(fn () => ['available' => false]);
+        return $this->state(fn () => ['active' => false]);
     }
 
     public function free(): static

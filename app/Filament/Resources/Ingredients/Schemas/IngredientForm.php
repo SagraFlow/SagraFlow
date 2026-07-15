@@ -14,8 +14,8 @@ class IngredientForm
         return $schema
             ->columns(1)
             ->components([
-                Toggle::make('available')
-                    ->label('Disponibile')
+                Toggle::make('active')
+                    ->label('Attivo')
                     ->default(true),
                 TextInput::make('name')
                     ->label('Nome')

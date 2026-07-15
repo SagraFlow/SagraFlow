@@ -15,12 +15,12 @@ class Ingredient extends Model
 
     use NormalizesName;
 
-    protected $fillable = ['name', 'surcharge', 'stock', 'available'];
+    protected $fillable = ['name', 'surcharge', 'stock', 'active'];
 
     protected function casts(): array
     {
         return [
-            'available' => 'boolean',
+            'active' => 'boolean',
             'surcharge' => 'integer',
             'stock' => 'integer',
         ];
@@ -32,8 +32,8 @@ class Ingredient extends Model
             ->withPivot('quantity', 'min_quantity', 'max_quantity');
     }
 
-    public function scopeAvailable($query)
+    public function scopeActive($query)
     {
-        return $query->where('available', true);
+        return $query->where('active', true);
     }
 }

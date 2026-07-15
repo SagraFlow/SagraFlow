@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('name', 100)->unique();
             $table->unsignedInteger('position')->default(0);
-            $table->boolean('available')->default(true);
+            $table->boolean('active')->default(true);
             $table->timestamps();
         });
     }

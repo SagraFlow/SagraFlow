@@ -27,8 +27,8 @@ class CategoriesTable
                     ->label('Pietanze')
                     ->counts('foods')
                     ->badge(),
-                IconColumn::make('available')
-                    ->label('Disponibile')
+                IconColumn::make('active')
+                    ->label('Attiva')
                     ->boolean(),
             ])
             ->filters([

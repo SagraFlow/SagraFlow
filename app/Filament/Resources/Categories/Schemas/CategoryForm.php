@@ -13,8 +13,8 @@ class CategoryForm
         return $schema
             ->columns(1)
             ->components([
-                Toggle::make('available')
-                    ->label('Disponibile')
+                Toggle::make('active')
+                    ->label('Attiva')
                     ->default(true),
                 TextInput::make('name')
                     ->label('Nome')

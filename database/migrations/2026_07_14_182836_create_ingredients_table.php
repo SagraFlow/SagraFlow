@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('name', 100)->unique();
             $table->unsignedInteger('surcharge')->default(0);
             $table->integer('stock')->nullable();
-            $table->boolean('available')->default(true);
+            $table->boolean('active')->default(true);
             $table->timestamps();
         });
     }

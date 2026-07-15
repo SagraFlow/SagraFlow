@@ -23,13 +23,13 @@ class FoodFactory extends Factory
             'category_id' => Category::factory(),
             'name' => fake()->unique()->words(3, true),
             'price' => fake()->numberBetween(2, 18) * 50, // centesimi, step da 0,50€
-            'available' => true,
+            'active' => true,
         ];
     }
 
-    public function unavailable(): static
+    public function inactive(): static
     {
-        return $this->state(fn () => ['available' => false]);
+        return $this->state(fn () => ['active' => false]);
     }
 
     public function withIngredients(int $count = 3): static

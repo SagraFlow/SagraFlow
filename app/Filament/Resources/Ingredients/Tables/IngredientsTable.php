@@ -31,8 +31,8 @@ class IngredientsTable
                     ->numeric()
                     ->sortable()
                     ->placeholder('Non tracciato'),
-                IconColumn::make('available')
-                    ->label('Disponibile')
+                IconColumn::make('active')
+                    ->label('Attivo')
                     ->boolean(),
             ])
             ->filters([

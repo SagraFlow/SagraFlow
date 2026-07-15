@@ -18,12 +18,12 @@ class Food extends Model
 
     protected $table = 'foods';
 
-    protected $fillable = ['category_id', 'name', 'price', 'available'];
+    protected $fillable = ['category_id', 'name', 'price', 'active'];
 
     protected function casts(): array
     {
         return [
-            'available' => 'boolean',
+            'active' => 'boolean',
             'price' => 'integer',
         ];
     }
@@ -44,9 +44,9 @@ class Food extends Model
         return $this->belongsToMany(EventDay::class);
     }
 
-    public function scopeAvailable($query)
+    public function scopeActive($query)
     {
-        return $query->where('available', true);
+        return $query->where('active', true);
     }
 
     /**

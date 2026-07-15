@@ -38,8 +38,8 @@ class FoodTable
                     ->state(fn (Food $record): ?array => $record->eventDays->isEmpty()
                         ? null
                         : $record->eventDays->pluck('display_name')->all()),
-                IconColumn::make('available')
-                    ->label('Disponibile')
+                IconColumn::make('active')
+                    ->label('Attiva')
                     ->boolean(),
             ])
             ->filters([

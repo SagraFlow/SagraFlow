@@ -15,12 +15,12 @@ class Category extends Model
 
     use NormalizesName;
 
-    protected $fillable = ['name', 'position', 'available'];
+    protected $fillable = ['name', 'position', 'active'];
 
     protected function casts(): array
     {
         return [
-            'available' => 'boolean',
+            'active' => 'boolean',
             'position' => 'integer',
         ];
     }
@@ -39,9 +39,9 @@ class Category extends Model
         return $this->hasMany(Food::class);
     }
 
-    public function scopeAvailable($query)
+    public function scopeActive($query)
     {
-        return $query->where('available', true);
+        return $query->where('active', true);
     }
 
     public function scopeOrdered($query)
