@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Activatable;
 use App\Models\Concerns\NormalizesName;
 use Database\Factories\FoodFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -11,9 +12,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Food extends Model
 {
+    use Activatable;
+
     /** @use HasFactory<FoodFactory> */
     use HasFactory;
-
     use NormalizesName;
 
     protected $table = 'foods';
@@ -42,11 +44,6 @@ class Food extends Model
     public function eventDays(): BelongsToMany
     {
         return $this->belongsToMany(EventDay::class);
-    }
-
-    public function scopeActive($query)
-    {
-        return $query->where('active', true);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Activatable;
 use App\Models\Concerns\NormalizesName;
 use Database\Factories\CategoryFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,9 +11,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Category extends Model
 {
+    use Activatable;
+
     /** @use HasFactory<CategoryFactory> */
     use HasFactory;
-
     use NormalizesName;
 
     protected $fillable = ['name', 'position', 'active'];
@@ -39,9 +41,9 @@ class Category extends Model
         return $this->hasMany(Food::class);
     }
 
-    public function scopeActive($query)
+    public function printRoutes(): HasMany
     {
-        return $query->where('active', true);
+        return $this->hasMany(PrintRoute::class);
     }
 
     public function scopeOrdered($query)

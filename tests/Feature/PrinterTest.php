@@ -3,6 +3,7 @@
 use App\Exceptions\PrinterException;
 use App\Models\CashRegister;
 use App\Models\Printer;
+use App\Models\PrintRoute;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -34,6 +35,17 @@ it('scopes to active printers', function () {
     expect(Printer::active()->count())->toBe(1);
 });
 
+it('scopes out printers assigned to a cash register', function () {
+    $free = Printer::factory()->create();
+    $assigned = Printer::factory()->create();
+    CashRegister::factory()->create(['printer_id' => $assigned->id]);
+
+    $ids = Printer::notAssignedToCashRegister()->pluck('id');
+
+    expect($ids)->toContain($free->id)
+        ->and($ids)->not->toContain($assigned->id);
+});
+
 it('is the local printer of at most one cash register', function () {
     $printer = Printer::factory()->create();
     $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
@@ -62,4 +74,12 @@ it('can be deleted when not linked to a cash register', function () {
     $printer->delete();
 
     expect(Printer::whereKey($printer->id)->exists())->toBeFalse();
+});
+
+it('cannot be deleted while used by a print route', function () {
+    $printer = Printer::factory()->create();
+    PrintRoute::factory()->create(['printer_id' => $printer->id]);
+
+    expect(fn () => $printer->delete())->toThrow(PrinterException::class);
+    expect(Printer::whereKey($printer->id)->exists())->toBeTrue();
 });

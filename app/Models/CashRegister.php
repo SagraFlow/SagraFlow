@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Activatable;
 use App\Models\Concerns\NormalizesName;
 use Database\Factories\CashRegisterFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,9 +11,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CashRegister extends Model
 {
+    use Activatable;
+
     /** @use HasFactory<CashRegisterFactory> */
     use HasFactory;
-
     use NormalizesName;
 
     protected $fillable = ['name', 'printer_id', 'active'];
@@ -27,10 +29,5 @@ class CashRegister extends Model
     public function printer(): BelongsTo
     {
         return $this->belongsTo(Printer::class);
-    }
-
-    public function scopeActive($query)
-    {
-        return $query->where('active', true);
     }
 }
