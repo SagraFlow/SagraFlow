@@ -1,6 +1,6 @@
 <div class="flex flex-1 flex-col items-center justify-center gap-6 p-8">
     <h1 class="text-2xl font-semibold">Seleziona la cassa</h1>
-    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+    <div class="flex flex-wrap justify-center gap-4">
         @foreach ($this->registers as $register)
             <button
                 type="button"
@@ -11,7 +11,7 @@
             </button>
         @endforeach
         @if ($this->registers->isEmpty())
-            <p class="col-span-full text-neutral-500">Nessuna cassa attiva configurata.</p>
+            <p class="text-neutral-500">Nessuna cassa attiva configurata.</p>
         @endif
     </div>
 </div>
