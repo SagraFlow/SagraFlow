@@ -10,7 +10,7 @@
             </div>
 
             @if ($discountType !== null)
-                <input type="number" step="0.01" min="0" wire:model.live="discountValue"
+                <input type="text" inputmode="decimal" wire:model.live="discountValue"
                     placeholder="{{ $discountType === 'percentage' ? 'es. 10 (%)' : 'es. 2,00 (€)' }}"
                     class="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
             @endif

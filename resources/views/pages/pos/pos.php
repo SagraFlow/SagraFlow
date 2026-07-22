@@ -55,13 +55,14 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public ?string $discountType = null;
 
-    public ?float $discountValue = null;
+    /** Raw discount value as typed: euros for a fixed discount, percent otherwise. */
+    public ?string $discountValue = null;
 
     public bool $showDiscount = false;
 
     public ?string $discountTypeBackup = null;
 
-    public ?float $discountValueBackup = null;
+    public ?string $discountValueBackup = null;
 
     public bool $showCashModal = false;
 
@@ -69,7 +70,11 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public bool $showClearCart = false;
 
-    public float $cashReceived = 0;
+    /** Cash tendered, in cents (authoritative). */
+    public int $cashReceivedCents = 0;
+
+    /** Raw euro amount typed in the cash field, parsed into cents. */
+    public string $cashInput = '';
 
     public ?int $placedOrderNumber = null;
 
@@ -224,12 +229,6 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function orderTotal(): int
     {
         return $this->cartTotal - $this->discountAmount + $this->coverTotal;
-    }
-
-    #[Computed]
-    public function cashReceivedCents(): int
-    {
-        return (int) round($this->cashReceived * 100);
     }
 
     #[Computed]
@@ -490,23 +489,43 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
-        $this->cashReceived = 0;
+        $this->resetCash();
         $this->showCashModal = true;
     }
 
-    public function addCash(float $amount): void
+    public function updatedCashInput(): void
     {
-        $this->cashReceived += $amount;
+        $this->cashReceivedCents = $this->eurosToCents($this->cashInput);
+    }
+
+    public function addCash(int $cents): void
+    {
+        $this->cashReceivedCents += $cents;
+        $this->cashInput = number_format($this->cashReceivedCents / 100, 2, '.', '');
     }
 
     public function setExactCash(): void
     {
-        $this->cashReceived = $this->orderTotal / 100;
+        $this->cashReceivedCents = $this->orderTotal;
+        $this->cashInput = number_format($this->orderTotal / 100, 2, '.', '');
     }
 
     public function resetCash(): void
     {
-        $this->cashReceived = 0;
+        $this->cashReceivedCents = 0;
+        $this->cashInput = '';
+    }
+
+    /**
+     * Parse a euro amount typed by the operator (dot or comma) into cents.
+     */
+    protected function eurosToCents(?string $value): int
+    {
+        if ($value === null || trim($value) === '') {
+            return 0;
+        }
+
+        return (int) round(((float) str_replace(',', '.', $value)) * 100);
     }
 
     public function closeCash(): void
@@ -619,7 +638,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
 
         $this->placedOrderNumber = $order->number;
-        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'cashReceived');
+        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'cashReceivedCents', 'cashInput');
     }
 
     public function newOrder(): void
@@ -734,12 +753,14 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     protected function discountValueForDomain(): ?int
     {
-        if ($this->discountType === null || $this->discountValue === null) {
+        if ($this->discountType === null || $this->discountValue === null || trim($this->discountValue) === '') {
             return null;
         }
 
+        $value = (float) str_replace(',', '.', $this->discountValue);
+
         return $this->discountType === DiscountType::Fixed->value
-            ? (int) round($this->discountValue * 100)
-            : (int) $this->discountValue;
+            ? (int) round($value * 100)
+            : (int) round($value);
     }
 };

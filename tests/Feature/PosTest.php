@@ -476,14 +476,14 @@ it('clears the cart and the order details', function () {
 it('reverts the discount when cancelled', function () {
     $component = Livewire::test('pages::pos')
         ->set('discountType', 'fixed')
-        ->set('discountValue', 5)
+        ->set('discountValue', '5')
         ->call('openDiscount')
         ->set('discountType', 'percentage')
-        ->set('discountValue', 50)
+        ->set('discountValue', '50')
         ->call('cancelDiscount');
 
     expect($component->get('discountType'))->toBe('fixed')
-        ->and($component->get('discountValue'))->toBe(5.0);
+        ->and($component->get('discountValue'))->toBe('5');
 
     $component->assertSet('showDiscount', false);
 });
@@ -627,7 +627,7 @@ it('does not confirm cash payment when the amount is insufficient', function () 
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
         ->call('startCash')
-        ->call('addCash', 5) // only 5€ for a 10€ order
+        ->call('addCash', 500) // only 5€ for a 10€ order
         ->call('confirmCash');
 
     expect(Order::count())->toBe(0);
@@ -643,13 +643,41 @@ it('computes the change for a cash payment', function () {
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
         ->call('startCash')
-        ->call('addCash', 20);
+        ->call('addCash', 2000);
 
-    expect($component->get('cashReceived'))->toBe(20.0);
+    expect($component->get('cashReceivedCents'))->toBe(2000);
     // 20€ received - 12€ total = 8€ change
     $component->call('confirmCash')->assertHasNoErrors();
 
     expect(Order::first()->total)->toBe(1200);
+});
+
+it('parses the typed cash amount into cents', function () {
+    $component = Livewire::test('pages::pos')
+        ->set('cashInput', '12,50');
+
+    expect($component->get('cashReceivedCents'))->toBe(1250);
+});
+
+it('does not place a second order when the payment is confirmed twice', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors();
+
+    // A duplicate confirm (e.g. an accidental double click) must be a no-op:
+    // the cart has already been cleared by the first, successful checkout.
+    $component->call('confirmCash');
+
+    expect(Order::count())->toBe(1);
 });
 
 it('cancels a card payment without creating the order', function () {

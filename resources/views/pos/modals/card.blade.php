@@ -10,8 +10,8 @@
             @enderror
 
             <div class="mt-6 space-y-2">
-                <button type="button" wire:click="confirmCard"
-                    class="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 font-medium text-white">
+                <button type="button" wire:click="confirmCard" wire:loading.attr="disabled" wire:target="confirmCard"
+                    class="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 font-medium text-white disabled:opacity-40">
                     <x-heroicon-o-check-circle class="h-5 w-5" />
                     Pagamento riuscito
                 </button>
