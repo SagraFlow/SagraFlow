@@ -9,6 +9,7 @@ use App\Models\EventDay;
 use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Order;
+use App\Printing\OrderPrinter;
 use App\Settings\EventSettings;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -630,11 +631,19 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
                 $this->covers,
                 $this->coverCharge,
                 $this->discountAppliesToCover,
+                $method === 'cash' ? $this->cashReceivedCents : null,
             );
         } catch (OrderException $e) {
             $this->addError('checkout', $e->getMessage());
 
             return;
+        }
+
+        // Printing must never roll back a placed order: queue it, swallow setup errors.
+        try {
+            app(OrderPrinter::class)->print($order);
+        } catch (Throwable $e) {
+            report($e);
         }
 
         $this->placedOrderNumber = $order->number;

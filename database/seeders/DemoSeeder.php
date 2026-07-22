@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\PrintDestination;
+use App\Enums\PrintJobType;
 use App\Enums\ServiceType;
 use App\Models\CashRegister;
 use App\Models\Category;
@@ -54,22 +55,22 @@ class DemoSeeder extends Seeder
         // Print routing.
         $cucina->printRoutes()->createMany([
             // Table service: kitchen comanda.
-            ['service_type' => ServiceType::TableService, 'destination' => PrintDestination::DepartmentPrinter, 'printer_id' => $printers['Cucina']->id, 'grouped' => true, 'position' => 1],
-            // Pickup: kitchen comanda + a grouped pickup ticket at the register.
-            ['service_type' => ServiceType::Pickup, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
-            ['service_type' => ServiceType::Pickup, 'destination' => PrintDestination::DepartmentPrinter, 'printer_id' => $printers['Cucina']->id, 'grouped' => true, 'position' => 2],
+            ['service_type' => ServiceType::TableService, 'document' => PrintJobType::DepartmentTicket, 'destination' => PrintDestination::DepartmentPrinter, 'printer_id' => $printers['Cucina']->id, 'grouped' => true, 'position' => 1],
+            // Pickup: customer pickup stub at the register + kitchen comanda for prep.
+            ['service_type' => ServiceType::Pickup, 'document' => PrintJobType::PickupStub, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
+            ['service_type' => ServiceType::Pickup, 'document' => PrintJobType::DepartmentTicket, 'destination' => PrintDestination::DepartmentPrinter, 'printer_id' => $printers['Cucina']->id, 'grouped' => true, 'position' => 2],
         ]);
 
         $bar->printRoutes()->createMany([
-            ['service_type' => ServiceType::TableService, 'destination' => PrintDestination::DepartmentPrinter, 'printer_id' => $printers['Bar']->id, 'grouped' => true, 'position' => 1],
-            ['service_type' => ServiceType::Pickup, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
+            ['service_type' => ServiceType::TableService, 'document' => PrintJobType::DepartmentTicket, 'destination' => PrintDestination::DepartmentPrinter, 'printer_id' => $printers['Bar']->id, 'grouped' => true, 'position' => 1],
+            // Pickup: one pickup stub per portion at the register.
+            ['service_type' => ServiceType::Pickup, 'document' => PrintJobType::PickupStub, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => false, 'position' => 1],
         ]);
 
         $dopoCena->printRoutes()->createMany([
-            // Table service: register ticket + kitchen comanda.
-            ['service_type' => ServiceType::TableService, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
-            // Pickup: register ticket first, then kitchen comanda.
-            ['service_type' => ServiceType::Pickup, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
+            // Only a pickup stub at the register for both service types.
+            ['service_type' => ServiceType::TableService, 'document' => PrintJobType::PickupStub, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
+            ['service_type' => ServiceType::Pickup, 'document' => PrintJobType::PickupStub, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
         ]);
 
         // Ingredients (name => surcharge in cents).

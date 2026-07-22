@@ -11,6 +11,7 @@
         "filament/spatie-laravel-settings-plugin": "^5.6",
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0",
+        "mike42/escpos-php": "^5.0",
         "spatie/laravel-settings": "^3.9"
     },
     "require-dev": {

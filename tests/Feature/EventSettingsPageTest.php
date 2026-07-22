@@ -5,6 +5,8 @@ use App\Models\User;
 use App\Settings\EventSettings;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -57,6 +59,24 @@ it('saves the discount-applies-to-cover flag', function () {
         ->assertHasNoErrors();
 
     expect(app(EventSettings::class)->discountAppliesToCover)->toBeTrue();
+});
+
+it('stores an uploaded receipt logo on the public disk', function () {
+    Storage::fake('public');
+
+    Livewire::test(ManageEventSettings::class)
+        ->fillForm([
+            'eventName' => 'Sagra',
+            'coverCharge' => '1,00',
+            'logo' => UploadedFile::fake()->image('logo.png', 200, 100),
+        ])
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $logo = app(EventSettings::class)->logo;
+
+    expect($logo)->not->toBeNull();
+    Storage::disk('public')->assertExists($logo);
 });
 
 it('requires the event name', function () {

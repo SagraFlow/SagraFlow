@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PrintDestination;
+use App\Enums\PrintJobType;
 use App\Enums\ServiceType;
 use App\Filament\Resources\Categories\Pages\CreateCategory;
 use App\Filament\Resources\Categories\Pages\EditCategory;
@@ -33,6 +34,7 @@ it('creates a category with print routes from the create page', function () {
             'active' => true,
             'printRoutes_table_service' => [
                 [
+                    'document' => PrintJobType::DepartmentTicket->value,
                     'destination' => PrintDestination::DepartmentPrinter->value,
                     'printer_id' => $printer->id,
                     'grouped' => true,
@@ -63,6 +65,7 @@ it('saves one service without deleting the others', function () {
         ->fillForm([
             'printRoutes_table_service' => [
                 [
+                    'document' => PrintJobType::DepartmentTicket->value,
                     'destination' => PrintDestination::DepartmentPrinter->value,
                     'printer_id' => $printer->id,
                     'grouped' => true,
@@ -88,11 +91,13 @@ it('persists the order of the destinations', function () {
         ->fillForm([
             'printRoutes_pickup' => [
                 [
+                    'document' => PrintJobType::PickupStub->value,
                     'destination' => PrintDestination::CashRegister->value,
                     'printer_id' => null,
                     'grouped' => false,
                 ],
                 [
+                    'document' => PrintJobType::DepartmentTicket->value,
                     'destination' => PrintDestination::DepartmentPrinter->value,
                     'printer_id' => $printer->id,
                     'grouped' => true,
@@ -128,11 +133,13 @@ it('supports multiple destinations for one service (double print)', function () 
         ->fillForm([
             'printRoutes_pickup' => [
                 [
+                    'document' => PrintJobType::PickupStub->value,
                     'destination' => PrintDestination::CashRegister->value,
                     'printer_id' => null,
                     'grouped' => false,
                 ],
                 [
+                    'document' => PrintJobType::DepartmentTicket->value,
                     'destination' => PrintDestination::DepartmentPrinter->value,
                     'printer_id' => $printer->id,
                     'grouped' => true,

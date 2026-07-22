@@ -20,7 +20,7 @@ class Order extends Model
     /** @use HasFactory<OrderFactory> */
     use HasFactory;
 
-    protected $fillable = ['event_day_id', 'cash_register_id', 'user_id', 'number', 'table_number', 'customer_name', 'covers', 'cover_charge', 'service_type', 'status', 'payment_method', 'subtotal', 'discount_type', 'discount_value', 'discount_amount', 'discount_applies_to_cover', 'total', 'paid_at'];
+    protected $fillable = ['event_day_id', 'cash_register_id', 'user_id', 'number', 'table_number', 'customer_name', 'covers', 'cover_charge', 'service_type', 'status', 'payment_method', 'subtotal', 'discount_type', 'discount_value', 'discount_amount', 'discount_applies_to_cover', 'total', 'cash_received', 'paid_at'];
 
     protected function casts(): array
     {
@@ -38,6 +38,7 @@ class Order extends Model
             'discount_amount' => 'integer',
             'discount_applies_to_cover' => 'boolean',
             'total' => 'integer',
+            'cash_received' => 'integer',
             'paid_at' => 'datetime',
         ];
     }
@@ -71,6 +72,14 @@ class Order extends Model
     }
 
     /**
+     * Change given back for a cash payment (cents); 0 when not a cash payment.
+     */
+    public function changeGiven(): int
+    {
+        return $this->cash_received !== null ? max(0, $this->cash_received - $this->total) : 0;
+    }
+
+    /**
      * Place a paid order for the given operational day. The service type is
      * derived from the table number: set means table service, null means pickup.
      *
@@ -97,6 +106,7 @@ class Order extends Model
         ?int $covers = null,
         int $coverCharge = 0,
         bool $discountAppliesToCover = false,
+        ?int $cashReceived = null,
     ): self {
         if ($items === []) {
             throw new OrderException('Un ordine deve contenere almeno una pietanza.');
@@ -122,7 +132,7 @@ class Order extends Model
         for ($attempt = 0; $attempt < 5; $attempt++) {
             try {
                 return DB::transaction(fn (): self => static::build(
-                    $day, $register, $operator, $tableNumber, $customerName, $covers, $coverCharge, $paymentMethod, $items, $discountType, $discountValue, $discountAppliesToCover,
+                    $day, $register, $operator, $tableNumber, $customerName, $covers, $coverCharge, $paymentMethod, $items, $discountType, $discountValue, $discountAppliesToCover, $cashReceived,
                 ));
             } catch (UniqueConstraintViolationException) {
                 continue;
@@ -156,6 +166,7 @@ class Order extends Model
         ?DiscountType $discountType,
         ?int $discountValue,
         bool $discountAppliesToCover,
+        ?int $cashReceived,
     ): self {
         $order = static::create([
             'event_day_id' => $day->id,
@@ -175,6 +186,7 @@ class Order extends Model
             'discount_amount' => 0,
             'discount_applies_to_cover' => $discountAppliesToCover,
             'total' => 0,
+            'cash_received' => $cashReceived,
             'paid_at' => now(),
         ]);
 

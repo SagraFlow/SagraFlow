@@ -16,6 +16,8 @@ return new class extends Migration
             $table->foreignId('category_id')->constrained()->cascadeOnDelete();
             $table->string('service_type');
             $table->string('destination');
+            // Document produced by this route: 'department_ticket' (comanda) or 'pickup_stub' (tagliandino).
+            $table->string('document')->default('department_ticket');
             $table->foreignId('printer_id')->nullable()->constrained()->restrictOnDelete();
             $table->boolean('grouped')->default(true);
             $table->unsignedInteger('position')->default(0);

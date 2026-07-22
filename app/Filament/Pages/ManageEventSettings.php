@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Filament\Forms\Components\MoneyInput;
 use App\Settings\EventSettings;
 use BackedEnum;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Pages\SettingsPage;
@@ -44,6 +45,19 @@ class ManageEventSettings extends SettingsPage
                 Toggle::make('discountAppliesToCover')
                     ->label('Applica lo sconto anche al coperto')
                     ->helperText('Se attivo, lo sconto dell\'ordine riduce anche il costo del coperto.'),
+                FileUpload::make('logo')
+                    ->label('Logo scontrino')
+                    ->image()
+                    ->disk('public')
+                    ->directory('logos')
+                    ->acceptedFileTypes(['image/png', 'image/jpeg'])
+                    ->maxSize(1024)
+                    ->imageResizeMode('contain')
+                    ->imageResizeTargetWidth('600')
+                    ->imageResizeTargetHeight('600')
+                    ->imageResizeUpscale(false)
+                    ->imageEditor()
+                    ->helperText('PNG/JPEG, max 1MB. Ridimensionato a max 600px in fase di caricamento e stampato monocromatico in cima allo scontrino.'),
             ]);
     }
 }

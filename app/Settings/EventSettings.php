@@ -18,6 +18,11 @@ class EventSettings extends Settings
      */
     public bool $discountAppliesToCover;
 
+    /**
+     * Relative path (on the public disk) of the logo printed on receipts.
+     */
+    public ?string $logo;
+
     public static function group(): string
     {
         return 'event';

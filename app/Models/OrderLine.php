@@ -56,22 +56,34 @@ class OrderLine extends Model
     }
 
     /**
+     * Deviations from the base recipe, each with its per-portion surcharge (cents).
+     *
+     * @return array<int, array{label: string, surcharge: int}>
+     */
+    public function deviations(): array
+    {
+        return $this->ingredients
+            ->filter(fn (OrderLineIngredient $ingredient): bool => $ingredient->quantity !== $ingredient->base_quantity)
+            ->map(function (OrderLineIngredient $ingredient): array {
+                if ($ingredient->quantity === 0) {
+                    $label = 'senza '.$ingredient->ingredient_name;
+                } else {
+                    $delta = $ingredient->quantity - $ingredient->base_quantity;
+                    $label = ($delta > 0 ? '+'.$delta : (string) $delta).' '.$ingredient->ingredient_name;
+                }
+
+                return ['label' => $label, 'surcharge' => $ingredient->surchargeTotal()];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
      * Human-readable summary of the deviations from the base recipe,
      * e.g. "+1 Salamina, senza Cipolla". Empty when nothing was customized.
      */
     public function deviationSummary(): string
     {
-        return $this->ingredients
-            ->filter(fn (OrderLineIngredient $ingredient): bool => $ingredient->quantity !== $ingredient->base_quantity)
-            ->map(function (OrderLineIngredient $ingredient): string {
-                if ($ingredient->quantity === 0) {
-                    return 'senza '.$ingredient->ingredient_name;
-                }
-
-                $delta = $ingredient->quantity - $ingredient->base_quantity;
-
-                return ($delta > 0 ? '+'.$delta : (string) $delta).' '.$ingredient->ingredient_name;
-            })
-            ->implode(', ');
+        return collect($this->deviations())->pluck('label')->implode(', ');
     }
 }

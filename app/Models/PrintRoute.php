@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PrintDestination;
+use App\Enums\PrintJobType;
 use App\Enums\ServiceType;
 use Database\Factories\PrintRouteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,13 +15,14 @@ class PrintRoute extends Model
     /** @use HasFactory<PrintRouteFactory> */
     use HasFactory;
 
-    protected $fillable = ['category_id', 'service_type', 'destination', 'printer_id', 'grouped', 'position'];
+    protected $fillable = ['category_id', 'service_type', 'destination', 'document', 'printer_id', 'grouped', 'position'];
 
     protected function casts(): array
     {
         return [
             'service_type' => ServiceType::class,
             'destination' => PrintDestination::class,
+            'document' => PrintJobType::class,
             'grouped' => 'boolean',
             'position' => 'integer',
         ];

@@ -6,8 +6,12 @@ use App\Enums\PaymentMethod;
 use App\Enums\ServiceType;
 use App\Filament\Tables\Columns\MoneyColumn;
 use App\Models\Order;
+use App\Printing\OrderPrinter;
+use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
+use Filament\Notifications\Notification;
 use Filament\Support\Enums\Width;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -78,6 +82,20 @@ class OrdersTable
                             'operator',
                         ]),
                     ])),
+                Action::make('reprint')
+                    ->label('Ristampa')
+                    ->icon(Heroicon::OutlinedPrinter)
+                    ->requiresConfirmation()
+                    ->modalHeading('Ristampa ordine')
+                    ->modalDescription(fn (Order $record): string => "Rimettere in coda scontrino e comande dell'ordine #{$record->number}?")
+                    ->action(function (Order $record): void {
+                        app(OrderPrinter::class)->print($record);
+
+                        Notification::make()
+                            ->success()
+                            ->title('Stampa rimessa in coda')
+                            ->send();
+                    }),
             ]);
     }
 }

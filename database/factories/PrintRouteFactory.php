@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\PrintDestination;
+use App\Enums\PrintJobType;
 use App\Enums\ServiceType;
 use App\Models\Category;
 use App\Models\Printer;
@@ -25,9 +26,18 @@ class PrintRouteFactory extends Factory
             'category_id' => Category::factory(),
             'service_type' => ServiceType::TableService,
             'destination' => PrintDestination::DepartmentPrinter,
+            'document' => PrintJobType::DepartmentTicket,
             'printer_id' => Printer::factory(),
             'grouped' => true,
         ];
+    }
+
+    /**
+     * Produce a customer pickup stub (tagliandino) instead of a kitchen comanda.
+     */
+    public function pickupStub(): static
+    {
+        return $this->state(fn (): array => ['document' => PrintJobType::PickupStub]);
     }
 
     /**

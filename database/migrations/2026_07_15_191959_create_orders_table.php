@@ -32,6 +32,8 @@ return new class extends Migration
             // Whether the discount was applied to the cover charge too, frozen at order time.
             $table->boolean('discount_applies_to_cover')->default(false);
             $table->unsignedInteger('total')->default(0);
+            // Cash tendered for a cash payment (cents); null for card payments.
+            $table->unsignedInteger('cash_received')->nullable();
             $table->timestamp('paid_at')->nullable();
             $table->timestamps();
 

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Categories\Schemas;
 
 use App\Enums\PrintDestination;
+use App\Enums\PrintJobType;
 use App\Enums\ServiceType;
 use App\Models\Category;
 use App\Models\Printer;
@@ -69,6 +70,16 @@ class CategoryForm
             ->addActionLabel('Aggiungi destinazione')
             ->columns(2)
             ->schema([
+                Select::make('document')
+                    ->label('Tipo di stampa')
+                    ->options(PrintJobType::routableOptions())
+                    ->required()
+                    ->default(PrintJobType::DepartmentTicket->value),
+                Toggle::make('grouped')
+                    ->label('Raggruppa i prodotti')
+                    ->helperText('Disattiva per stampare un tagliandino singolo per unità.')
+                    ->default(true)
+                    ->inline(false),
                 Select::make('destination')
                     ->label('Destinazione')
                     ->options(PrintDestination::class)
@@ -86,11 +97,6 @@ class CategoryForm
                     ->searchable()
                     ->visible($requiresPrinter)
                     ->required($requiresPrinter),
-                Toggle::make('grouped')
-                    ->label('Raggruppa i prodotti')
-                    ->helperText('Disattiva per stampare un tagliandino singolo per unità.')
-                    ->default(true)
-                    ->columnSpanFull(),
             ]);
     }
 }
