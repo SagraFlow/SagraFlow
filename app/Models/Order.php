@@ -7,7 +7,6 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\ServiceType;
 use App\Exceptions\OrderException;
-use App\Settings\EventSettings;
 use Database\Factories\OrderFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -75,7 +74,13 @@ class Order extends Model
      * Place a paid order for the given operational day. The service type is
      * derived from the table number: set means table service, null means pickup.
      *
-     * @param  array<int, array{food: Food, quantity: int, ingredients?: array<int, array{ingredient: Ingredient, quantity: int}>}>  $items
+     * Line prices, names, surcharges and doses are frozen snapshots taken when
+     * the items were added to the cart: they are persisted verbatim, never
+     * re-read from the current Food/Ingredient records. The `*_id` values are
+     * only used to re-link the (nullable) foreign keys and are stored as null
+     * when the referenced record no longer exists.
+     *
+     * @param  array<int, array{food_id: ?int, food_name: string, unit_price: int, quantity: int, note?: ?string, ingredients?: array<int, array{ingredient_id: ?int, ingredient_name: string, quantity: int, base_quantity: int, surcharge: int}>}>  $items
      *
      * @throws OrderException
      */
@@ -90,6 +95,8 @@ class Order extends Model
         ?DiscountType $discountType = null,
         ?int $discountValue = null,
         ?int $covers = null,
+        int $coverCharge = 0,
+        bool $discountAppliesToCover = false,
     ): self {
         if ($items === []) {
             throw new OrderException('Un ordine deve contenere almeno una pietanza.');
@@ -103,11 +110,19 @@ class Order extends Model
             throw new OrderException('La percentuale di sconto deve essere tra 0 e 100.');
         }
 
+        if ($discountType === DiscountType::Fixed && ($discountValue ?? 0) < 0) {
+            throw new OrderException('Lo sconto non può essere negativo.');
+        }
+
+        if ($customerName !== null && mb_strlen($customerName) > 255) {
+            throw new OrderException('Il nome cliente è troppo lungo.');
+        }
+
         // Retry on a lost number race: (event_day_id, number) is unique.
         for ($attempt = 0; $attempt < 5; $attempt++) {
             try {
                 return DB::transaction(fn (): self => static::build(
-                    $day, $register, $operator, $tableNumber, $customerName, $covers, $paymentMethod, $items, $discountType, $discountValue,
+                    $day, $register, $operator, $tableNumber, $customerName, $covers, $coverCharge, $paymentMethod, $items, $discountType, $discountValue, $discountAppliesToCover,
                 ));
             } catch (UniqueConstraintViolationException) {
                 continue;
@@ -126,7 +141,7 @@ class Order extends Model
     }
 
     /**
-     * @param  array<int, array{food: Food, quantity: int, ingredients?: array<int, array{ingredient: Ingredient, quantity: int}>}>  $items
+     * @param  array<int, array{food_id: ?int, food_name: string, unit_price: int, quantity: int, note?: ?string, ingredients?: array<int, array{ingredient_id: ?int, ingredient_name: string, quantity: int, base_quantity: int, surcharge: int}>}>  $items
      */
     protected static function build(
         EventDay $day,
@@ -135,14 +150,13 @@ class Order extends Model
         ?int $tableNumber,
         ?string $customerName,
         ?int $covers,
+        int $coverCharge,
         PaymentMethod $paymentMethod,
         array $items,
         ?DiscountType $discountType,
         ?int $discountValue,
+        bool $discountAppliesToCover,
     ): self {
-        $settings = app(EventSettings::class);
-        $coverCharge = $settings->coverCharge;
-
         $order = static::create([
             'event_day_id' => $day->id,
             'cash_register_id' => $register?->id,
@@ -159,7 +173,7 @@ class Order extends Model
             'discount_type' => $discountType,
             'discount_value' => $discountValue,
             'discount_amount' => 0,
-            'discount_applies_to_cover' => $settings->discountAppliesToCover,
+            'discount_applies_to_cover' => $discountAppliesToCover,
             'total' => 0,
             'paid_at' => now(),
         ]);
@@ -167,7 +181,7 @@ class Order extends Model
         $subtotal = 0;
 
         foreach ($items as $item) {
-            $subtotal += $order->addLine($item['food'], $item['quantity'], $item['ingredients'] ?? [], $item['note'] ?? null)->line_total;
+            $subtotal += $order->addLine($item)->line_total;
         }
 
         $coverTotal = $order->coverTotal();
@@ -184,7 +198,7 @@ class Order extends Model
     }
 
     /**
-     * Resolve the discount amount (in cents), never exceeding the subtotal.
+     * Resolve the discount amount (in cents), clamped between 0 and the subtotal.
      */
     public static function calculateDiscount(int $subtotal, ?DiscountType $type, ?int $value): int
     {
@@ -194,49 +208,44 @@ class Order extends Model
             null => 0,
         };
 
-        return min($amount, $subtotal);
+        return max(0, min($amount, $subtotal));
     }
 
     /**
-     * @param  array<int, array{ingredient: Ingredient, quantity: int}>  $chosenIngredients
+     * Persist a single order line from its frozen cart snapshot. Prices, names,
+     * surcharges and doses are stored verbatim; the `*_id` values re-link the
+     * foreign keys and fall back to null when the record no longer exists.
+     *
+     * @param  array{food_id: ?int, food_name: string, unit_price: int, quantity: int, note?: ?string, ingredients?: array<int, array{ingredient_id: ?int, ingredient_name: string, quantity: int, base_quantity: int, surcharge: int}>}  $item
      *
      * @throws OrderException
      */
-    protected function addLine(Food $food, int $quantity, array $chosenIngredients, ?string $note = null): OrderLine
+    protected function addLine(array $item): OrderLine
     {
-        if ($quantity < 1) {
-            throw new OrderException("Quantità non valida per \"{$food->name}\".");
+        if ($item['quantity'] < 1) {
+            throw new OrderException("Quantità non valida per \"{$item['food_name']}\".");
+        }
+
+        if (($item['note'] ?? null) !== null && mb_strlen($item['note']) > 255) {
+            throw new OrderException("La nota per \"{$item['food_name']}\" è troppo lunga.");
         }
 
         $line = $this->lines()->create([
-            'food_id' => $food->id,
-            'food_name' => $food->name,
-            'unit_price' => $food->price,
-            'quantity' => $quantity,
+            'food_id' => $item['food_id'],
+            'food_name' => $item['food_name'],
+            'unit_price' => $item['unit_price'],
+            'quantity' => $item['quantity'],
             'line_total' => 0,
-            'note' => $note,
+            'note' => $item['note'] ?? null,
         ]);
 
-        $lineIngredients = collect($chosenIngredients)->map(function (array $chosen) use ($food, $line): OrderLineIngredient {
-            $ingredient = $chosen['ingredient'];
-            $pivot = $food->ingredients->firstWhere('id', $ingredient->id)?->pivot;
-
-            if ($pivot === null) {
-                throw new OrderException("\"{$ingredient->name}\" non fa parte di \"{$food->name}\".");
-            }
-
-            if ($chosen['quantity'] < $pivot->min_quantity || $chosen['quantity'] > $pivot->max_quantity) {
-                throw new OrderException("Quantità di \"{$ingredient->name}\" fuori dai limiti consentiti.");
-            }
-
-            return $line->ingredients()->create([
-                'ingredient_id' => $ingredient->id,
-                'ingredient_name' => $ingredient->name,
-                'quantity' => $chosen['quantity'],
-                'base_quantity' => $pivot->quantity,
-                'surcharge' => $ingredient->surcharge,
-            ]);
-        });
+        $lineIngredients = collect($item['ingredients'] ?? [])->map(fn (array $chosen): OrderLineIngredient => $line->ingredients()->create([
+            'ingredient_id' => $chosen['ingredient_id'],
+            'ingredient_name' => $chosen['ingredient_name'],
+            'quantity' => $chosen['quantity'],
+            'base_quantity' => $chosen['base_quantity'],
+            'surcharge' => $chosen['surcharge'],
+        ]));
 
         $line->setRelation('ingredients', $lineIngredients);
         $line->forceFill(['line_total' => $line->computeTotal()])->save();

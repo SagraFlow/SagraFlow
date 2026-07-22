@@ -11,7 +11,6 @@ use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Order;
 use App\Models\User;
-use App\Settings\EventSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -30,6 +29,40 @@ function foodWithSalamina(int $price = 400, int $base = 1, int $min = 1, int $ma
     return [$food->fresh(), $salamina];
 }
 
+/**
+ * A frozen cart line snapshot for a food, as the POS hands it to Order::place().
+ *
+ * @param  array<int, array<string, mixed>>  $ingredients
+ * @return array<string, mixed>
+ */
+function frozenLine(Food $food, int $quantity = 1, array $ingredients = [], ?string $note = null): array
+{
+    return [
+        'food_id' => $food->id,
+        'food_name' => $food->name,
+        'unit_price' => $food->price,
+        'quantity' => $quantity,
+        'note' => $note,
+        'ingredients' => $ingredients,
+    ];
+}
+
+/**
+ * A frozen ingredient snapshot for a cart line.
+ *
+ * @return array<string, mixed>
+ */
+function frozenIngredient(Ingredient $ingredient, int $quantity, int $baseQuantity): array
+{
+    return [
+        'ingredient_id' => $ingredient->id,
+        'ingredient_name' => $ingredient->name,
+        'quantity' => $quantity,
+        'base_quantity' => $baseQuantity,
+        'surcharge' => $ingredient->surcharge,
+    ];
+}
+
 it('places a paid table order with a progressive number and frozen snapshots', function () {
     $day = EventDay::factory()->create();
     $register = CashRegister::factory()->create();
@@ -37,7 +70,7 @@ it('places a paid table order with a progressive number and frozen snapshots', f
     [$food, $salamina] = foodWithSalamina();
 
     $order = Order::place($day, $register, $operator, 5, 'Mario', PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1, 'ingredients' => [['ingredient' => $salamina, 'quantity' => 1]]],
+        frozenLine($food, 1, [frozenIngredient($salamina, 1, 1)]),
     ]);
 
     expect($order->number)->toBe(1)
@@ -52,17 +85,46 @@ it('places a paid table order with a progressive number and frozen snapshots', f
         ->and($order->lines->first()->unit_price)->toBe(400);
 });
 
+it('persists the frozen line snapshot instead of the current food price', function () {
+    $day = EventDay::factory()->create();
+    $food = Food::factory()->create(['name' => 'Panino', 'price' => 500]);
+
+    // The cart froze 500; the food is repriced to 700 before checkout.
+    $line = frozenLine($food, 2);
+    $food->update(['price' => 700]);
+
+    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [$line]);
+
+    expect($order->lines->first()->unit_price)->toBe(500)
+        ->and($order->total)->toBe(1000);
+});
+
+it('records a line even when the referenced food no longer exists', function () {
+    $day = EventDay::factory()->create();
+
+    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        [
+            'food_id' => null,
+            'food_name' => 'Pietanza rimossa',
+            'unit_price' => 500,
+            'quantity' => 2,
+            'note' => null,
+            'ingredients' => [],
+        ],
+    ]);
+
+    expect($order->lines->first()->food_id)->toBeNull()
+        ->and($order->lines->first()->food_name)->toBe('Pietanza rimossa')
+        ->and($order->total)->toBe(1000);
+});
+
 it('adds the cover charge to the total and freezes the per-cover amount', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 400);
 
-    $settings = app(EventSettings::class);
-    $settings->coverCharge = 150;
-    $settings->save();
-
     $order = Order::place($day, null, null, 5, 'Mario', PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
-    ], covers: 4);
+        frozenLine($food, 1),
+    ], covers: 4, coverCharge: 150);
 
     expect($order->cover_charge)->toBe(150)
         ->and($order->coverTotal())->toBe(600)
@@ -74,13 +136,9 @@ it('applies the discount before adding the cover charge', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 1000);
 
-    $settings = app(EventSettings::class);
-    $settings->coverCharge = 200;
-    $settings->save();
-
     $order = Order::place($day, null, null, 2, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
-    ], DiscountType::Percentage, 10, covers: 3);
+        frozenLine($food, 1),
+    ], DiscountType::Percentage, 10, covers: 3, coverCharge: 200);
 
     // 1000 − 10% = 900 discounted goods, + 3 × 200 coperto = 1500
     expect($order->discount_amount)->toBe(100)
@@ -91,36 +149,22 @@ it('discounts the cover charge when the setting is enabled', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 1000);
 
-    $settings = app(EventSettings::class);
-    $settings->coverCharge = 200;
-    $settings->discountAppliesToCover = true;
-    $settings->save();
-
     $order = Order::place($day, null, null, 2, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
-    ], DiscountType::Percentage, 10, covers: 3);
+        frozenLine($food, 1),
+    ], DiscountType::Percentage, 10, covers: 3, coverCharge: 200, discountAppliesToCover: true);
 
     // base = 1000 goods + 3 × 200 coperto = 1600; 10% discount = 160; total = 1440
     expect($order->discount_amount)->toBe(160)
         ->and($order->total)->toBe(1440);
 });
 
-it('freezes the discount-applies-to-cover choice on the order', function () {
+it('stores the discount-applies-to-cover choice on the order', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 1000);
 
-    $settings = app(EventSettings::class);
-    $settings->coverCharge = 200;
-    $settings->discountAppliesToCover = true;
-    $settings->save();
-
     $order = Order::place($day, null, null, 1, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
-    ], DiscountType::Percentage, 10, covers: 2);
-
-    // Flipping the setting mid-event must not change an already placed order.
-    $settings->discountAppliesToCover = false;
-    $settings->save();
+        frozenLine($food, 1),
+    ], DiscountType::Percentage, 10, covers: 2, coverCharge: 200, discountAppliesToCover: true);
 
     expect($order->fresh()->discount_applies_to_cover)->toBeTrue()
         ->and($order->total)->toBe(1260); // base 1000 + 400 coperto = 1400; −10% = 140; total 1260
@@ -130,8 +174,8 @@ it('derives the service type from the table number', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 
-    $table = Order::place($day, null, null, 7, null, PaymentMethod::Cash, [['food' => $food, 'quantity' => 1]]);
-    $pickup = Order::place($day, null, null, null, null, PaymentMethod::Cash, [['food' => $food, 'quantity' => 1]]);
+    $table = Order::place($day, null, null, 7, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $pickup = Order::place($day, null, null, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
 
     expect($table->service_type)->toBe(ServiceType::TableService)
         ->and($pickup->service_type)->toBe(ServiceType::Pickup)
@@ -143,7 +187,7 @@ it('charges the surcharge only on units above the base dose', function () {
     [$food, $salamina] = foodWithSalamina(price: 400, base: 1, max: 2, surcharge: 200);
 
     $order = Order::place($day, null, null, null, null, PaymentMethod::Card, [
-        ['food' => $food, 'quantity' => 2, 'ingredients' => [['ingredient' => $salamina, 'quantity' => 2]]],
+        frozenLine($food, 2, [frozenIngredient($salamina, 2, 1)]),
     ]);
 
     // (400 base + 200 for the 1 extra salamina) * 2 portions
@@ -155,9 +199,9 @@ it('numbers orders progressively within a day and independently across days', fu
     $day2 = EventDay::factory()->create(['date' => '2026-07-11']);
     [$food] = foodWithSalamina();
 
-    $a = Order::place($day1, null, null, 1, null, PaymentMethod::Cash, [['food' => $food, 'quantity' => 1]]);
-    $b = Order::place($day1, null, null, 2, null, PaymentMethod::Cash, [['food' => $food, 'quantity' => 1]]);
-    $c = Order::place($day2, null, null, null, null, PaymentMethod::Cash, [['food' => $food, 'quantity' => 1]]);
+    $a = Order::place($day1, null, null, 1, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $b = Order::place($day1, null, null, 2, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $c = Order::place($day2, null, null, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
 
     expect([$a->number, $b->number, $c->number])->toBe([1, 2, 1]);
 });
@@ -167,7 +211,7 @@ it('applies a fixed discount to the total', function () {
     [$food] = foodWithSalamina(price: 400);
 
     $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
+        frozenLine($food, 1),
     ], DiscountType::Fixed, 100);
 
     expect($order->subtotal)->toBe(400)
@@ -180,7 +224,7 @@ it('applies a percentage discount to the subtotal', function () {
     [$food] = foodWithSalamina(price: 1000);
 
     $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
+        frozenLine($food, 1),
     ], DiscountType::Percentage, 10);
 
     expect($order->subtotal)->toBe(1000)
@@ -193,7 +237,7 @@ it('never discounts more than the subtotal', function () {
     [$food] = foodWithSalamina(price: 400);
 
     $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
+        frozenLine($food, 1),
     ], DiscountType::Fixed, 5000);
 
     expect($order->discount_amount)->toBe(400)
@@ -205,26 +249,38 @@ it('rejects a percentage discount outside 0–100', function () {
     [$food] = foodWithSalamina();
 
     Order::place($day, null, null, null, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1],
+        frozenLine($food, 1),
     ], DiscountType::Percentage, 150);
 })->throws(OrderException::class);
 
-it('rejects a chosen ingredient quantity outside the allowed range', function () {
+it('rejects a negative fixed discount', function () {
     $day = EventDay::factory()->create();
-    [$food, $salamina] = foodWithSalamina(max: 2);
+    [$food] = foodWithSalamina();
 
     Order::place($day, null, null, null, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1, 'ingredients' => [['ingredient' => $salamina, 'quantity' => 3]]],
+        frozenLine($food, 1),
+    ], DiscountType::Fixed, -100);
+})->throws(OrderException::class);
+
+it('never returns a negative discount amount', function () {
+    expect(Order::calculateDiscount(1000, DiscountType::Fixed, -500))->toBe(0);
+});
+
+it('rejects a customer name longer than 255 characters', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina();
+
+    Order::place($day, null, null, null, str_repeat('a', 256), PaymentMethod::Cash, [
+        frozenLine($food, 1),
     ]);
 })->throws(OrderException::class);
 
-it('rejects an ingredient that is not part of the food', function () {
+it('rejects a line note longer than 255 characters', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
-    $stranger = Ingredient::factory()->create();
 
     Order::place($day, null, null, null, null, PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1, 'ingredients' => [['ingredient' => $stranger, 'quantity' => 1]]],
+        frozenLine($food, 1, [], str_repeat('a', 256)),
     ]);
 })->throws(OrderException::class);
 
@@ -233,7 +289,7 @@ it('stores the covers count and per-line notes', function () {
     [$food] = foodWithSalamina();
 
     $order = Order::place($day, null, null, 5, 'Mario', PaymentMethod::Cash, [
-        ['food' => $food, 'quantity' => 1, 'note' => 'ben cotto'],
+        frozenLine($food, 1, [], 'ben cotto'),
     ], null, null, 4);
 
     expect($order->covers)->toBe(4)

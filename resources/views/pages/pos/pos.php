@@ -13,6 +13,7 @@ use App\Settings\EventSettings;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -25,6 +26,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
      *
      * @var array<string, array{food_id: int, name: string, unit_price: int, quantity: int, ingredients: array<int, array{ingredient_id: int, name: string, quantity: int, base_quantity: int, surcharge: int}>}>
      */
+    #[Locked]
     public array $cart = [];
 
     public ?int $customizingFoodId = null;
@@ -42,6 +44,14 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public ?string $customerName = null;
 
     public int $covers = 0;
+
+    /** Per-cover charge (coperto) frozen when the sale started, in cents. */
+    #[Locked]
+    public ?int $frozenCoverCharge = null;
+
+    /** Whether the discount applies to the coperto, frozen when the sale started. */
+    #[Locked]
+    public ?bool $frozenDiscountAppliesToCover = null;
 
     public ?string $discountType = null;
 
@@ -172,7 +182,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function discountAmount(): int
     {
         $base = $this->cartTotal
-            + (app(EventSettings::class)->discountAppliesToCover ? $this->coverTotal : 0);
+            + ($this->discountAppliesToCover ? $this->coverTotal : 0);
 
         return Order::calculateDiscount(
             $base,
@@ -182,12 +192,23 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     }
 
     /**
-     * Per-cover charge (coperto) currently configured, in cents.
+     * Per-cover charge (coperto) for the current sale, in cents. Frozen once the
+     * sale starts so a mid-sale price change never diverges from the receipt.
      */
     #[Computed]
     public function coverCharge(): int
     {
-        return app(EventSettings::class)->coverCharge;
+        return $this->frozenCoverCharge ?? app(EventSettings::class)->coverCharge;
+    }
+
+    /**
+     * Whether the discount applies to the coperto for the current sale, frozen
+     * once the sale starts.
+     */
+    #[Computed]
+    public function discountAppliesToCover(): bool
+    {
+        return $this->frozenDiscountAppliesToCover ?? app(EventSettings::class)->discountAppliesToCover;
     }
 
     /**
@@ -283,7 +304,24 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
+        $this->startSaleIfNeeded();
         $this->addToCart($food, $this->lineIngredients($food));
+    }
+
+    /**
+     * Freeze the event settings that affect pricing the first time an item is
+     * added, so the cart preview and the placed order stay consistent even if
+     * the settings change mid-sale.
+     */
+    protected function startSaleIfNeeded(): void
+    {
+        if ($this->frozenCoverCharge !== null) {
+            return;
+        }
+
+        $settings = app(EventSettings::class);
+        $this->frozenCoverCharge = $settings->coverCharge;
+        $this->frozenDiscountAppliesToCover = $settings->discountAppliesToCover;
     }
 
     /**
@@ -400,7 +438,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
      */
     public function clearCart(): void
     {
-        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'discountType', 'discountValue', 'showClearCart');
+        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart');
     }
 
     public function openDiscount(): void
@@ -422,9 +460,33 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $this->showDiscount = false;
     }
 
+    /**
+     * Reason the sale cannot be checked out right now, or null when it can.
+     * Guards against state that changed after the cart was started (the day
+     * being closed, the selected register being deactivated).
+     */
+    protected function checkoutBlocker(): ?string
+    {
+        if ($this->day === null) {
+            return 'La giornata non è più aperta.';
+        }
+
+        if ($this->cashRegisterId !== null && $this->cashRegister === null) {
+            return 'La cassa selezionata non è più attiva. Riselezionala.';
+        }
+
+        return null;
+    }
+
     public function startCash(): void
     {
         if ($this->cart === []) {
+            return;
+        }
+
+        if ($blocker = $this->checkoutBlocker()) {
+            $this->addError('checkout', $blocker);
+
             return;
         }
 
@@ -467,6 +529,12 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
+        if ($blocker = $this->checkoutBlocker()) {
+            $this->addError('checkout', $blocker);
+
+            return;
+        }
+
         $this->showCardModal = true;
     }
 
@@ -492,28 +560,40 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
+        if ($blocker = $this->checkoutBlocker()) {
+            $this->addError('checkout', $blocker);
+
+            return;
+        }
+
+        // The order is built from the frozen cart snapshot; the ids only re-link
+        // the (nullable) foreign keys and become null if the record is gone.
+        $existingFoodIds = Food::whereIn('id', collect($this->cart)->pluck('food_id'))
+            ->pluck('id')
+            ->all();
+
+        $existingIngredientIds = Ingredient::whereIn('id', collect($this->cart)
+            ->flatMap(fn (array $line): array => array_column($line['ingredients'], 'ingredient_id')))
+            ->pluck('id')
+            ->all();
+
         $items = collect($this->cart)
-            ->map(function (array $line): ?array {
-                $food = Food::find($line['food_id']);
-
-                if ($food === null) {
-                    return null;
-                }
-
-                return [
-                    'food' => $food,
-                    'quantity' => $line['quantity'],
-                    'note' => $line['note'] ?? null,
-                    'ingredients' => collect($line['ingredients'])
-                        ->map(fn (array $i): ?array => ($ingredient = Ingredient::find($i['ingredient_id'])) !== null
-                            ? ['ingredient' => $ingredient, 'quantity' => $i['quantity']]
-                            : null)
-                        ->filter()
-                        ->values()
-                        ->all(),
-                ];
-            })
-            ->filter()
+            ->map(fn (array $line): array => [
+                'food_id' => in_array($line['food_id'], $existingFoodIds, true) ? $line['food_id'] : null,
+                'food_name' => $line['name'],
+                'unit_price' => $line['unit_price'],
+                'quantity' => $line['quantity'],
+                'note' => $line['note'] ?? null,
+                'ingredients' => collect($line['ingredients'])
+                    ->map(fn (array $i): array => [
+                        'ingredient_id' => in_array($i['ingredient_id'], $existingIngredientIds, true) ? $i['ingredient_id'] : null,
+                        'ingredient_name' => $i['name'],
+                        'quantity' => $i['quantity'],
+                        'base_quantity' => $i['base_quantity'],
+                        'surcharge' => $i['surcharge'],
+                    ])
+                    ->all(),
+            ])
             ->values()
             ->all();
 
@@ -529,6 +609,8 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
                 $this->discountType !== null ? DiscountType::from($this->discountType) : null,
                 $this->discountValueForDomain(),
                 $this->covers,
+                $this->coverCharge,
+                $this->discountAppliesToCover,
             );
         } catch (OrderException $e) {
             $this->addError('checkout', $e->getMessage());
@@ -537,7 +619,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
 
         $this->placedOrderNumber = $order->number;
-        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'cashReceived');
+        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'cashReceived');
     }
 
     public function newOrder(): void

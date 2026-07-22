@@ -313,6 +313,134 @@ it('does not add a cover charge when none is configured', function () {
     expect(Order::first()->total)->toBe(500);
 });
 
+it('charges the price frozen when the item was added, not the current one', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id); // freezes 5,00
+
+    // Admin reprices the food mid-sale.
+    $food->update(['price' => 900]);
+
+    $component->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors();
+
+    $order = Order::first();
+
+    expect($order->total)->toBe(500)
+        ->and($order->lines->first()->unit_price)->toBe(500);
+});
+
+it('freezes the cover charge from when the sale started', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 100;
+    $settings->save();
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id) // freezes coperto at 1,00
+        ->set('tableNumber', 1)
+        ->call('incCovers');
+
+    // Admin changes the coperto mid-sale.
+    $settings->coverCharge = 300;
+    $settings->save();
+
+    $component->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors();
+
+    $order = Order::first();
+
+    expect($order->cover_charge)->toBe(100) // sale-start value, not 300
+        ->and($order->total)->toBe(600);    // 500 + 1 × 100
+});
+
+it('freezes the discount-on-cover choice from when the sale started', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 1000]);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 200;
+    $settings->discountAppliesToCover = true;
+    $settings->save();
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id) // freezes flag = true, coperto 2,00
+        ->set('tableNumber', 1)
+        ->call('incCovers')
+        ->set('discountType', 'percentage')
+        ->set('discountValue', 10);
+
+    // Admin turns the flag off mid-sale.
+    $settings->discountAppliesToCover = false;
+    $settings->save();
+
+    $component->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors();
+
+    $order = Order::first();
+
+    // Frozen flag = true → base 1000 + 200 = 1200; −10% = 120; total 1080
+    expect($order->discount_applies_to_cover)->toBeTrue()
+        ->and($order->total)->toBe(1080);
+});
+
+it('blocks checkout when the day has been closed mid-sale', function () {
+    $day = openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+
+    $day->close(auth()->user());
+
+    $component->call('startCash')
+        ->assertHasErrors('checkout')
+        ->assertSet('showCashModal', false);
+
+    expect(Order::count())->toBe(0);
+});
+
+it('blocks checkout when the selected register was deactivated mid-sale', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+
+    $register->update(['active' => false]);
+
+    $component->call('startCard')
+        ->assertHasErrors('checkout')
+        ->assertSet('showCardModal', false);
+
+    expect(Order::count())->toBe(0);
+});
+
 it('logs the operator out', function () {
     openDay();
     $register = CashRegister::factory()->create();
