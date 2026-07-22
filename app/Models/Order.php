@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\ServiceType;
 use App\Exceptions\OrderException;
+use App\Settings\EventSettings;
 use Database\Factories\OrderFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -20,7 +21,7 @@ class Order extends Model
     /** @use HasFactory<OrderFactory> */
     use HasFactory;
 
-    protected $fillable = ['event_day_id', 'cash_register_id', 'user_id', 'number', 'table_number', 'customer_name', 'covers', 'service_type', 'status', 'payment_method', 'subtotal', 'discount_type', 'discount_value', 'discount_amount', 'total', 'paid_at'];
+    protected $fillable = ['event_day_id', 'cash_register_id', 'user_id', 'number', 'table_number', 'customer_name', 'covers', 'cover_charge', 'service_type', 'status', 'payment_method', 'subtotal', 'discount_type', 'discount_value', 'discount_amount', 'discount_applies_to_cover', 'total', 'paid_at'];
 
     protected function casts(): array
     {
@@ -32,9 +33,11 @@ class Order extends Model
             'number' => 'integer',
             'table_number' => 'integer',
             'covers' => 'integer',
+            'cover_charge' => 'integer',
             'subtotal' => 'integer',
             'discount_value' => 'integer',
             'discount_amount' => 'integer',
+            'discount_applies_to_cover' => 'boolean',
             'total' => 'integer',
             'paid_at' => 'datetime',
         ];
@@ -58,6 +61,14 @@ class Order extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(OrderLine::class);
+    }
+
+    /**
+     * Total cover charge (coperto) for the order: covers × per-cover charge (in cents).
+     */
+    public function coverTotal(): int
+    {
+        return ($this->covers ?? 0) * $this->cover_charge;
     }
 
     /**
@@ -129,6 +140,9 @@ class Order extends Model
         ?DiscountType $discountType,
         ?int $discountValue,
     ): self {
+        $settings = app(EventSettings::class);
+        $coverCharge = $settings->coverCharge;
+
         $order = static::create([
             'event_day_id' => $day->id,
             'cash_register_id' => $register?->id,
@@ -137,6 +151,7 @@ class Order extends Model
             'table_number' => $tableNumber,
             'customer_name' => $customerName,
             'covers' => $covers,
+            'cover_charge' => $coverCharge,
             'service_type' => $tableNumber !== null ? ServiceType::TableService : ServiceType::Pickup,
             'status' => OrderStatus::Paid,
             'payment_method' => $paymentMethod,
@@ -144,6 +159,7 @@ class Order extends Model
             'discount_type' => $discountType,
             'discount_value' => $discountValue,
             'discount_amount' => 0,
+            'discount_applies_to_cover' => $settings->discountAppliesToCover,
             'total' => 0,
             'paid_at' => now(),
         ]);
@@ -154,12 +170,14 @@ class Order extends Model
             $subtotal += $order->addLine($item['food'], $item['quantity'], $item['ingredients'] ?? [], $item['note'] ?? null)->line_total;
         }
 
-        $discountAmount = static::calculateDiscount($subtotal, $discountType, $discountValue);
+        $coverTotal = $order->coverTotal();
+        $discountBase = $subtotal + ($order->discount_applies_to_cover ? $coverTotal : 0);
+        $discountAmount = static::calculateDiscount($discountBase, $discountType, $discountValue);
 
         $order->forceFill([
             'subtotal' => $subtotal,
             'discount_amount' => $discountAmount,
-            'total' => $subtotal - $discountAmount,
+            'total' => $subtotal + $coverTotal - $discountAmount,
         ])->save();
 
         return $order;

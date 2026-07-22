@@ -9,6 +9,7 @@ use App\Models\EventDay;
 use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Order;
+use App\Settings\EventSettings;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -170,17 +171,38 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     #[Computed]
     public function discountAmount(): int
     {
+        $base = $this->cartTotal
+            + (app(EventSettings::class)->discountAppliesToCover ? $this->coverTotal : 0);
+
         return Order::calculateDiscount(
-            $this->cartTotal,
+            $base,
             $this->discountType !== null ? DiscountType::from($this->discountType) : null,
             $this->discountValueForDomain(),
         );
     }
 
+    /**
+     * Per-cover charge (coperto) currently configured, in cents.
+     */
+    #[Computed]
+    public function coverCharge(): int
+    {
+        return app(EventSettings::class)->coverCharge;
+    }
+
+    /**
+     * Total cover charge for the order: covers × per-cover charge (in cents).
+     */
+    #[Computed]
+    public function coverTotal(): int
+    {
+        return $this->covers * $this->coverCharge;
+    }
+
     #[Computed]
     public function orderTotal(): int
     {
-        return $this->cartTotal - $this->discountAmount;
+        return $this->cartTotal - $this->discountAmount + $this->coverTotal;
     }
 
     #[Computed]

@@ -20,6 +20,8 @@ return new class extends Migration
             $table->unsignedInteger('table_number')->nullable();
             $table->string('customer_name')->nullable();
             $table->unsignedInteger('covers')->nullable();
+            // Per-cover charge (coperto) frozen at order time, in cents.
+            $table->unsignedInteger('cover_charge')->default(0);
             $table->string('service_type');
             $table->string('status')->default('open');
             $table->string('payment_method')->nullable();
@@ -27,6 +29,8 @@ return new class extends Migration
             $table->string('discount_type')->nullable();
             $table->unsignedInteger('discount_value')->nullable();
             $table->unsignedInteger('discount_amount')->default(0);
+            // Whether the discount was applied to the cover charge too, frozen at order time.
+            $table->boolean('discount_applies_to_cover')->default(false);
             $table->unsignedInteger('total')->default(0);
             $table->timestamp('paid_at')->nullable();
             $table->timestamps();

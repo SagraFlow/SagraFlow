@@ -13,6 +13,11 @@ class EventSettings extends Settings
      */
     public int $coverCharge;
 
+    /**
+     * Whether an order discount also reduces the cover charge (coperto).
+     */
+    public bool $discountAppliesToCover;
+
     public static function group(): string
     {
         return 'event';

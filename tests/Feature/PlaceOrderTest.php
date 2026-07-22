@@ -11,6 +11,7 @@ use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Order;
 use App\Models\User;
+use App\Settings\EventSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -49,6 +50,80 @@ it('places a paid table order with a progressive number and frozen snapshots', f
         ->and($order->total)->toBe(400)
         ->and($order->lines->first()->food_name)->toBe($food->name)
         ->and($order->lines->first()->unit_price)->toBe(400);
+});
+
+it('adds the cover charge to the total and freezes the per-cover amount', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina(price: 400);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 150;
+    $settings->save();
+
+    $order = Order::place($day, null, null, 5, 'Mario', PaymentMethod::Cash, [
+        ['food' => $food, 'quantity' => 1],
+    ], covers: 4);
+
+    expect($order->cover_charge)->toBe(150)
+        ->and($order->coverTotal())->toBe(600)
+        ->and($order->subtotal)->toBe(400)
+        ->and($order->total)->toBe(1000); // 400 goods + 4 × 150 coperto
+});
+
+it('applies the discount before adding the cover charge', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina(price: 1000);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 200;
+    $settings->save();
+
+    $order = Order::place($day, null, null, 2, null, PaymentMethod::Cash, [
+        ['food' => $food, 'quantity' => 1],
+    ], DiscountType::Percentage, 10, covers: 3);
+
+    // 1000 − 10% = 900 discounted goods, + 3 × 200 coperto = 1500
+    expect($order->discount_amount)->toBe(100)
+        ->and($order->total)->toBe(1500);
+});
+
+it('discounts the cover charge when the setting is enabled', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina(price: 1000);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 200;
+    $settings->discountAppliesToCover = true;
+    $settings->save();
+
+    $order = Order::place($day, null, null, 2, null, PaymentMethod::Cash, [
+        ['food' => $food, 'quantity' => 1],
+    ], DiscountType::Percentage, 10, covers: 3);
+
+    // base = 1000 goods + 3 × 200 coperto = 1600; 10% discount = 160; total = 1440
+    expect($order->discount_amount)->toBe(160)
+        ->and($order->total)->toBe(1440);
+});
+
+it('freezes the discount-applies-to-cover choice on the order', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina(price: 1000);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 200;
+    $settings->discountAppliesToCover = true;
+    $settings->save();
+
+    $order = Order::place($day, null, null, 1, null, PaymentMethod::Cash, [
+        ['food' => $food, 'quantity' => 1],
+    ], DiscountType::Percentage, 10, covers: 2);
+
+    // Flipping the setting mid-event must not change an already placed order.
+    $settings->discountAppliesToCover = false;
+    $settings->save();
+
+    expect($order->fresh()->discount_applies_to_cover)->toBeTrue()
+        ->and($order->total)->toBe(1260); // base 1000 + 400 coperto = 1400; −10% = 140; total 1260
 });
 
 it('derives the service type from the table number', function () {

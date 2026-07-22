@@ -6,6 +6,7 @@ use App\Filament\Forms\Components\MoneyInput;
 use App\Settings\EventSettings;
 use BackedEnum;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Pages\SettingsPage;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -40,6 +41,9 @@ class ManageEventSettings extends SettingsPage
                 MoneyInput::make('coverCharge')
                     ->label('Costo del coperto')
                     ->required(),
+                Toggle::make('discountAppliesToCover')
+                    ->label('Applica lo sconto anche al coperto')
+                    ->helperText('Se attivo, lo sconto dell\'ordine riduce anche il costo del coperto.'),
             ]);
     }
 }

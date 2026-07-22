@@ -46,6 +46,19 @@ it('saves the event name and the cover charge in cents', function () {
         ->and($settings->coverCharge)->toBe(150);
 });
 
+it('saves the discount-applies-to-cover flag', function () {
+    Livewire::test(ManageEventSettings::class)
+        ->fillForm([
+            'eventName' => 'Sagra',
+            'coverCharge' => '1,00',
+            'discountAppliesToCover' => true,
+        ])
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(app(EventSettings::class)->discountAppliesToCover)->toBeTrue();
+});
+
 it('requires the event name', function () {
     Livewire::test(ManageEventSettings::class)
         ->fillForm([

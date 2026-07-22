@@ -9,6 +9,7 @@ use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Order;
 use App\Models\User;
+use App\Settings\EventSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
@@ -231,6 +232,85 @@ it('records the number of covers on the order', function () {
         ->assertHasNoErrors();
 
     expect(Order::first()->covers)->toBe(4);
+});
+
+it('adds the cover charge to the order total', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 150;
+    $settings->save();
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->set('tableNumber', 3)
+        ->call('incCovers')
+        ->call('incCovers')
+        ->assertSee('Coperti')
+        ->assertSee('€ 8,00') // 5,00 goods + 2 × 1,50 coperto
+        ->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors();
+
+    $order = Order::first();
+
+    expect($order->total)->toBe(800)
+        ->and($order->covers)->toBe(2)
+        ->and($order->cover_charge)->toBe(150);
+});
+
+it('discounts the cover charge when the setting is enabled', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 1000]);
+
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 200;
+    $settings->discountAppliesToCover = true;
+    $settings->save();
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->set('tableNumber', 1)
+        ->call('incCovers') // 1 cover → 2,00 coperto
+        ->set('discountType', 'percentage')
+        ->set('discountValue', 10)
+        ->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors();
+
+    $order = Order::first();
+
+    // base 1000 + 200 = 1200; −10% = 120; total 1080
+    expect($order->total)->toBe(1080)
+        ->and($order->discount_amount)->toBe(120);
+});
+
+it('does not add a cover charge when none is configured', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('incCovers')
+        ->assertDontSee('Coperti (')
+        ->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors();
+
+    expect(Order::first()->total)->toBe(500);
 });
 
 it('logs the operator out', function () {

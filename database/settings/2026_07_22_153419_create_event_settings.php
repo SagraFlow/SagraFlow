@@ -8,5 +8,6 @@ return new class extends SettingsMigration
     {
         $this->migrator->add('event.eventName', '');
         $this->migrator->add('event.coverCharge', 0);
+        $this->migrator->add('event.discountAppliesToCover', false);
     }
 };

@@ -65,10 +65,15 @@
     {{-- Totals + payment --}}
     <div class="space-y-3 border-t border-neutral-200 p-4 dark:border-neutral-800">
         <div class="space-y-3 text-sm">
-            @if ($this->discountAmount > 0)
+            @if ($this->discountAmount > 0 || $this->coverTotal > 0)
                 <div class="space-y-1">
                     <div class="flex justify-between text-neutral-500"><span>Subtotale</span><span class="tabular-nums">{{ $this->money($this->cartTotal) }}</span></div>
-                    <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">− {{ $this->money($this->discountAmount) }}</span></div>
+                    @if ($this->coverTotal > 0)
+                        <div class="flex justify-between text-neutral-500"><span>Coperti ({{ $covers }} × {{ $this->money($this->coverCharge) }})</span><span class="tabular-nums">{{ $this->money($this->coverTotal) }}</span></div>
+                    @endif
+                    @if ($this->discountAmount > 0)
+                        <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">− {{ $this->money($this->discountAmount) }}</span></div>
+                    @endif
                 </div>
             @endif
             <div class="flex items-center justify-between text-lg font-semibold">
