@@ -1,0 +1,45 @@
+<?php
+
+namespace App\Filament\Pages;
+
+use App\Filament\Forms\Components\MoneyInput;
+use App\Settings\EventSettings;
+use BackedEnum;
+use Filament\Forms\Components\TextInput;
+use Filament\Pages\SettingsPage;
+use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
+use UnitEnum;
+
+class ManageEventSettings extends SettingsPage
+{
+    protected static string $settings = EventSettings::class;
+
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Configurazione';
+
+    protected static ?int $navigationSort = 99;
+
+    protected static ?string $title = 'Impostazioni';
+
+    public static function getNavigationLabel(): string
+    {
+        return 'Impostazioni';
+    }
+
+    public function form(Schema $schema): Schema
+    {
+        return $schema
+            ->columns(1)
+            ->components([
+                TextInput::make('eventName')
+                    ->label('Nome evento')
+                    ->required()
+                    ->maxLength(255),
+                MoneyInput::make('coverCharge')
+                    ->label('Costo del coperto')
+                    ->required(),
+            ]);
+    }
+}
