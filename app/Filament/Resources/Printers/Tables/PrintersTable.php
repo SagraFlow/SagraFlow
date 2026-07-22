@@ -31,7 +31,7 @@ class PrintersTable
                     ->label('Porta'),
                 TextColumn::make('cashRegister.name')
                     ->label('Cassa')
-                    ->placeholder('—'),
+                    ->placeholder('-'),
                 IconColumn::make('active')
                     ->label('Attiva')
                     ->boolean(),

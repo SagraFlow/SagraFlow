@@ -28,7 +28,7 @@ class EventDaysTable
                 TextColumn::make('label')
                     ->label('Etichetta')
                     ->searchable()
-                    ->placeholder('—'),
+                    ->placeholder('-'),
                 TextColumn::make('status')
                     ->label('Stato')
                     ->badge()
@@ -45,11 +45,11 @@ class EventDaysTable
                 TextColumn::make('opened_at')
                     ->label('Apertura')
                     ->dateTime()
-                    ->placeholder('—'),
+                    ->placeholder('-'),
                 TextColumn::make('closed_at')
                     ->label('Chiusura')
                     ->dateTime()
-                    ->placeholder('—'),
+                    ->placeholder('-'),
                 TextColumn::make('foods_count')
                     ->label('Pietanze esclusive')
                     ->counts('foods')

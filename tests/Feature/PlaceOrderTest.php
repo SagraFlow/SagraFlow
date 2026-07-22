@@ -129,7 +129,7 @@ it('adds the cover charge to the total and freezes the per-cover amount', functi
     expect($order->cover_charge)->toBe(150)
         ->and($order->coverTotal())->toBe(600)
         ->and($order->subtotal)->toBe(400)
-        ->and($order->total)->toBe(1000); // 400 goods + 4 × 150 coperto
+        ->and($order->total)->toBe(1000); // 400 goods + 4 x 150 coperto
 });
 
 it('applies the discount before adding the cover charge', function () {
@@ -140,7 +140,7 @@ it('applies the discount before adding the cover charge', function () {
         frozenLine($food, 1),
     ], DiscountType::Percentage, 10, covers: 3, coverCharge: 200);
 
-    // 1000 − 10% = 900 discounted goods, + 3 × 200 coperto = 1500
+    // 1000 - 10% = 900 discounted goods, + 3 x 200 coperto = 1500
     expect($order->discount_amount)->toBe(100)
         ->and($order->total)->toBe(1500);
 });
@@ -153,7 +153,7 @@ it('discounts the cover charge when the setting is enabled', function () {
         frozenLine($food, 1),
     ], DiscountType::Percentage, 10, covers: 3, coverCharge: 200, discountAppliesToCover: true);
 
-    // base = 1000 goods + 3 × 200 coperto = 1600; 10% discount = 160; total = 1440
+    // base = 1000 goods + 3 x 200 coperto = 1600; 10% discount = 160; total = 1440
     expect($order->discount_amount)->toBe(160)
         ->and($order->total)->toBe(1440);
 });
@@ -167,7 +167,7 @@ it('stores the discount-applies-to-cover choice on the order', function () {
     ], DiscountType::Percentage, 10, covers: 2, coverCharge: 200, discountAppliesToCover: true);
 
     expect($order->fresh()->discount_applies_to_cover)->toBeTrue()
-        ->and($order->total)->toBe(1260); // base 1000 + 400 coperto = 1400; −10% = 140; total 1260
+        ->and($order->total)->toBe(1260); // base 1000 + 400 coperto = 1400; -10% = 140; total 1260
 });
 
 it('derives the service type from the table number', function () {
@@ -244,7 +244,7 @@ it('never discounts more than the subtotal', function () {
         ->and($order->total)->toBe(0);
 });
 
-it('rejects a percentage discount outside 0–100', function () {
+it('rejects a percentage discount outside 0-100', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 

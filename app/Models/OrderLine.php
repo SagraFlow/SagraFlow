@@ -54,4 +54,24 @@ class OrderLine extends Model
     {
         return ($this->unit_price + $this->unitSurcharge()) * $this->quantity;
     }
+
+    /**
+     * Human-readable summary of the deviations from the base recipe,
+     * e.g. "+1 Salamina, senza Cipolla". Empty when nothing was customized.
+     */
+    public function deviationSummary(): string
+    {
+        return $this->ingredients
+            ->filter(fn (OrderLineIngredient $ingredient): bool => $ingredient->quantity !== $ingredient->base_quantity)
+            ->map(function (OrderLineIngredient $ingredient): string {
+                if ($ingredient->quantity === 0) {
+                    return 'senza '.$ingredient->ingredient_name;
+                }
+
+                $delta = $ingredient->quantity - $ingredient->base_quantity;
+
+                return ($delta > 0 ? '+'.$delta : (string) $delta).' '.$ingredient->ingredient_name;
+            })
+            ->implode(', ');
+    }
 }

@@ -217,7 +217,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     }
 
     /**
-     * Total cover charge for the order: covers × per-cover charge (in cents).
+     * Total cover charge for the order: covers x per-cover charge (in cents).
      */
     #[Computed]
     public function coverTotal(): int

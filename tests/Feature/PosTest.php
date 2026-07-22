@@ -251,7 +251,7 @@ it('adds the cover charge to the order total', function () {
         ->call('incCovers')
         ->call('incCovers')
         ->assertSee('Coperti')
-        ->assertSee('€ 8,00') // 5,00 goods + 2 × 1,50 coperto
+        ->assertSee('€ 8,00') // 5,00 goods + 2 x 1,50 coperto
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -289,7 +289,7 @@ it('discounts the cover charge when the setting is enabled', function () {
 
     $order = Order::first();
 
-    // base 1000 + 200 = 1200; −10% = 120; total 1080
+    // base 1000 + 200 = 1200; -10% = 120; total 1080
     expect($order->total)->toBe(1080)
         ->and($order->discount_amount)->toBe(120);
 });
@@ -365,7 +365,7 @@ it('freezes the cover charge from when the sale started', function () {
     $order = Order::first();
 
     expect($order->cover_charge)->toBe(100) // sale-start value, not 300
-        ->and($order->total)->toBe(600);    // 500 + 1 × 100
+        ->and($order->total)->toBe(600);    // 500 + 1 x 100
 });
 
 it('freezes the discount-on-cover choice from when the sale started', function () {
@@ -398,7 +398,7 @@ it('freezes the discount-on-cover choice from when the sale started', function (
 
     $order = Order::first();
 
-    // Frozen flag = true → base 1000 + 200 = 1200; −10% = 120; total 1080
+    // Frozen flag = true → base 1000 + 200 = 1200; -10% = 120; total 1080
     expect($order->discount_applies_to_cover)->toBeTrue()
         ->and($order->total)->toBe(1080);
 });

@@ -41,7 +41,7 @@ class DemoSeeder extends Seeder
         $bar = Category::create(['name' => 'Bar', 'position' => 2]);
         $dopoCena = Category::create(['name' => 'Dopo Cena', 'position' => 3]);
 
-        // Operational days (Fri–Sun); Saturday drives the day-restricted dishes below.
+        // Operational days (Fri-Sun); Saturday drives the day-restricted dishes below.
         $eventDays = collect([
             '2026-07-10' => 'Venerdì',
             '2026-07-11' => 'Sabato',
@@ -82,7 +82,7 @@ class DemoSeeder extends Seeder
             $name => Ingredient::create(['name' => $name, 'surcharge' => $surcharge]),
         ]);
 
-        // Menu — Cucina.
+        // Menu - Cucina.
         Food::create(['category_id' => $cucina->id, 'name' => 'Pane e Salamina', 'price' => 400])
             ->ingredients()->attach([
                 $ingredients['Pane']->id => ['quantity' => 1, 'min_quantity' => 0, 'max_quantity' => 1],
@@ -103,7 +103,7 @@ class DemoSeeder extends Seeder
         ]);
         $polentaBrasato->eventDays()->attach($saturday);
 
-        // Menu — Bar & Dopo Cena.
+        // Menu - Bar & Dopo Cena.
         Food::create(['category_id' => $bar->id, 'name' => 'Birra', 'price' => 500]);
         Food::create(['category_id' => $dopoCena->id, 'name' => 'Caffè', 'price' => 100]);
     }

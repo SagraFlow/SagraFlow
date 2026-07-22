@@ -45,7 +45,7 @@
                             <div class="truncate text-sm text-amber-600 dark:text-amber-500">{{ $this->lineNotes($line) }}</div>
                         @endif
                         @if (! empty($line['note']))
-                            <div class="truncate text-sm italic text-neutral-500">“{{ $line['note'] }}”</div>
+                            <div class="truncate text-sm italic text-neutral-500">"{{ $line['note'] }}"</div>
                         @endif
                         <div class="text-sm text-neutral-500">{{ $this->money($this->lineTotal($line)) }}</div>
                     </div>
@@ -69,10 +69,10 @@
                 <div class="space-y-1">
                     <div class="flex justify-between text-neutral-500"><span>Subtotale</span><span class="tabular-nums">{{ $this->money($this->cartTotal) }}</span></div>
                     @if ($this->coverTotal > 0)
-                        <div class="flex justify-between text-neutral-500"><span>Coperti ({{ $covers }} × {{ $this->money($this->coverCharge) }})</span><span class="tabular-nums">{{ $this->money($this->coverTotal) }}</span></div>
+                        <div class="flex justify-between text-neutral-500"><span>Coperti ({{ $covers }} x {{ $this->money($this->coverCharge) }})</span><span class="tabular-nums">{{ $this->money($this->coverTotal) }}</span></div>
                     @endif
                     @if ($this->discountAmount > 0)
-                        <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">− {{ $this->money($this->discountAmount) }}</span></div>
+                        <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">- {{ $this->money($this->discountAmount) }}</span></div>
                     @endif
                 </div>
             @endif

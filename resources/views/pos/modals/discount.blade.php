@@ -17,7 +17,7 @@
 
             <div class="mt-4 rounded-lg bg-neutral-100 p-3 text-sm dark:bg-neutral-800">
                 <div class="flex justify-between"><span>Subtotale</span><span class="tabular-nums">{{ $this->money($this->cartTotal) }}</span></div>
-                <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">− {{ $this->money($this->discountAmount) }}</span></div>
+                <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">- {{ $this->money($this->discountAmount) }}</span></div>
                 <div class="mt-1 flex justify-between border-t border-neutral-300 pt-1 text-base font-semibold dark:border-neutral-700"><span>Totale</span><span class="tabular-nums">{{ $this->money($this->orderTotal) }}</span></div>
             </div>
 

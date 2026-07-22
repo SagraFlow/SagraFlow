@@ -24,7 +24,7 @@ class CashRegistersTable
                     ->sortable(),
                 TextColumn::make('printer.name')
                     ->label('Stampante locale')
-                    ->placeholder('—'),
+                    ->placeholder('-'),
                 IconColumn::make('active')
                     ->label('Attiva')
                     ->boolean(),

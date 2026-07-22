@@ -63,7 +63,7 @@ class Order extends Model
     }
 
     /**
-     * Total cover charge (coperto) for the order: covers × per-cover charge (in cents).
+     * Total cover charge (coperto) for the order: covers x per-cover charge (in cents).
      */
     public function coverTotal(): int
     {
