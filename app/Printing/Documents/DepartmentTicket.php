@@ -6,8 +6,8 @@ use App\Models\Order;
 use Mike42\Escpos\Printer;
 
 /**
- * Preparation ticket (comanda) printed at a department/station printer:
- * items and quantities with their customizations, no prices.
+ * Preparation ticket (comanda) printed at a department/station printer: a large
+ * order number on top and the items printed large between two rules, no prices.
  */
 class DepartmentTicket extends Document
 {
@@ -16,7 +16,6 @@ class DepartmentTicket extends Document
      */
     public function __construct(
         private Order $order,
-        private string $station,
         private array $items,
     ) {}
 
@@ -24,27 +23,34 @@ class DepartmentTicket extends Document
     {
         $order = $this->order;
 
+        // Order number, large and bold, centered.
         $printer->setJustification(Printer::JUSTIFY_CENTER);
         $printer->setEmphasis(true);
-        $printer->text(mb_strtoupper($this->station)."\n");
+        $printer->setTextSize(2, 2);
+        $printer->text("#{$order->number}\n");
+        $printer->setTextSize(1, 1);
         $printer->setEmphasis(false);
-        $printer->text("Ordine #{$order->number}\n");
-        $printer->text(($order->paid_at?->format('d/m/Y H:i') ?? '')."\n");
         $printer->setJustification(Printer::JUSTIFY_LEFT);
-        $printer->text($this->divider());
 
-        $printer->text($this->columns('Servizio', $order->service_type?->getLabel() ?? '-'));
+        // Details section (table, customer, covers).
+        $printer->feed(1);
         if ($order->table_number !== null) {
             $printer->text($this->columns('Tavolo', (string) $order->table_number));
         }
-        if ($order->covers) {
+        if ($order->customer_name) {
+            $printer->text($this->columns('Cliente', $order->customer_name));
+        }
+        if (($order->covers ?? 0) > 0) {
             $printer->text($this->columns('Coperti', (string) $order->covers));
         }
-        $printer->text($this->divider());
 
+        // Items between two separators, printed large (2x2).
+        $printer->text($this->divider());
         foreach ($this->items as $item) {
             $printer->setEmphasis(true);
+            $printer->setTextSize(2, 2);
             $printer->text("{$item['quantity']}x {$item['name']}\n");
+            $printer->setTextSize(1, 1);
             $printer->setEmphasis(false);
             if ($item['deviation'] !== '') {
                 $printer->text('   '.$item['deviation']."\n");
@@ -53,6 +59,11 @@ class DepartmentTicket extends Document
                 $printer->text('   "'.$item['note']."\"\n");
             }
         }
+        $printer->text($this->divider());
+
+        // Footer: date/time on the left, order number on the right (like the receipt).
+        $printer->feed(1);
+        $printer->text($this->columns($order->paid_at?->format('d/m/Y H:i') ?? '', "#{$order->number}"));
 
         $printer->feed(2);
         $printer->cut();

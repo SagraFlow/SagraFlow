@@ -64,13 +64,13 @@ class OrderPrintRouter
                     : $this->active($route->printer);
 
                 if ($route->grouped) {
-                    $tasks[] = $this->task($order, $route, $printer, $category->name, $lines->map(
+                    $tasks[] = $this->task($order, $route, $printer, $category->name, $settings->eventName, $lines->map(
                         fn (OrderLine $line): array => $this->item($line, $line->quantity),
                     )->all());
                 } else {
                     foreach ($lines as $line) {
                         foreach (range(1, $line->quantity) as $ignored) {
-                            $tasks[] = $this->task($order, $route, $printer, $category->name, [$this->item($line, 1)]);
+                            $tasks[] = $this->task($order, $route, $printer, $category->name, $settings->eventName, [$this->item($line, 1)]);
                         }
                     }
                 }
@@ -83,11 +83,11 @@ class OrderPrintRouter
     /**
      * @param  array<int, array{name: string, quantity: int, deviation: string, note: ?string}>  $items
      */
-    private function task(Order $order, PrintRoute $route, ?Printer $printer, string $station, array $items): PrintTask
+    private function task(Order $order, PrintRoute $route, ?Printer $printer, string $station, string $eventName, array $items): PrintTask
     {
         $document = $route->document === PrintJobType::PickupStub
-            ? new PickupStub($order, $station, $items)
-            : new DepartmentTicket($order, $station, $items);
+            ? new PickupStub($order, $eventName, $station, $items)
+            : new DepartmentTicket($order, $items);
 
         return new PrintTask($printer, $route->document, $station, $document);
     }

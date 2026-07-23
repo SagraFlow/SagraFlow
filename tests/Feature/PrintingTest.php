@@ -118,25 +118,27 @@ it('ignores a missing logo without breaking the receipt', function () {
 it('renders a department ticket without prices', function () {
     ['order' => $order] = orderWithRoute();
 
-    $data = (new DepartmentTicket($order, 'Cucina', [
+    $data = (new DepartmentTicket($order, [
         ['name' => 'Panino', 'quantity' => 2, 'deviation' => '', 'note' => null],
     ]))->render();
 
     expect($data)
-        ->toContain('CUCINA')
+        ->toContain('#'.$order->number)
         ->toContain('2x Panino')
         ->not->toContain('5,00');
 });
 
-it('renders a pickup stub with a big order number and no prices', function () {
+it('renders a pickup stub with the event name, details and products, no prices', function () {
     ['order' => $order] = orderWithRoute();
 
-    $data = (new PickupStub($order, 'Bar', [
+    $data = (new PickupStub($order, 'Sagra Test', 'Bar', [
         ['name' => 'Birra', 'quantity' => 2, 'deviation' => '', 'note' => null],
     ]))->render();
 
     expect($data)
-        ->toContain('RITIRO BAR')
+        ->toContain('Sagra Test')
+        ->toContain('N. Ordine')
+        ->toContain('Bar')
         ->toContain('#'.$order->number)
         ->toContain('2x Birra')
         ->not->toContain('5,00');
