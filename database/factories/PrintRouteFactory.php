@@ -58,4 +58,15 @@ class PrintRouteFactory extends Factory
     {
         return $this->state(fn (): array => ['grouped' => false]);
     }
+
+    /**
+     * A covers (coperti) route: a standalone print subject with no category.
+     */
+    public function forCovers(): static
+    {
+        return $this->state(fn (): array => [
+            'for_covers' => true,
+            'category_id' => null,
+        ]);
+    }
 }

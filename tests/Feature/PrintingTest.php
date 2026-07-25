@@ -124,8 +124,99 @@ it('renders a department ticket without prices', function () {
 
     expect($data)
         ->toContain('#'.$order->number)
+        ->toContain('Tavolo')
+        ->toContain((string) $order->table_number)
         ->toContain('2x Panino')
         ->not->toContain('5,00');
+});
+
+/**
+ * A placed table order with covers, a normal category route and a covers route.
+ *
+ * @return array{order: Order, categoryPrinter: Printer, coversPrinter: Printer}
+ */
+function orderWithCoversRoute(int $covers = 4, PrintDestination $destination = PrintDestination::DepartmentPrinter): array
+{
+    $day = EventDay::factory()->create();
+    $registerPrinter = Printer::factory()->create(['name' => 'Cassa']);
+    $register = CashRegister::factory()->create(['printer_id' => $registerPrinter->id]);
+    $categoryPrinter = Printer::factory()->create(['name' => 'Cucina']);
+    $coversPrinter = Printer::factory()->create(['name' => 'Reparto Coperti']);
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'name' => 'Panino', 'price' => 500]);
+
+    PrintRoute::factory()->for($category)->create([
+        'service_type' => ServiceType::TableService,
+        'destination' => PrintDestination::DepartmentPrinter,
+        'printer_id' => $categoryPrinter->id,
+        'grouped' => true,
+    ]);
+    PrintRoute::factory()->forCovers()->create([
+        'service_type' => ServiceType::TableService,
+        'destination' => $destination,
+        'printer_id' => $destination === PrintDestination::DepartmentPrinter ? $coversPrinter->id : null,
+        'grouped' => true,
+    ]);
+
+    $order = Order::place($day, $register, null, 5, null, PaymentMethod::Cash, [
+        ['food_id' => $food->id, 'food_name' => 'Panino', 'unit_price' => 500, 'quantity' => 1, 'note' => null, 'ingredients' => []],
+    ], covers: $covers, coverCharge: 200);
+
+    return ['order' => $order, 'categoryPrinter' => $categoryPrinter, 'coversPrinter' => $coversPrinter];
+}
+
+it('routes a covers ticket to its configured printer, listing the covers count', function () {
+    ['order' => $order, 'coversPrinter' => $coversPrinter] = orderWithCoversRoute(covers: 4);
+
+    $order->loadMissing(['lines.food.category.printRoutes', 'cashRegister.printer']);
+    $coversTask = collect(app(OrderPrintRouter::class)->tasks($order))
+        ->first(fn ($task): bool => $task->label === 'Coperti');
+
+    expect($coversTask)->not->toBeNull()
+        ->and($coversTask->type)->toBe(PrintJobType::DepartmentTicket)
+        ->and($coversTask->printer->id)->toBe($coversPrinter->id)
+        ->and($coversTask->document->render())->toContain('4x Coperti');
+});
+
+it('resolves a covers route to the register printer for a cash-register destination', function () {
+    ['order' => $order] = orderWithCoversRoute(destination: PrintDestination::CashRegister);
+
+    $order->loadMissing(['lines.food.category.printRoutes', 'cashRegister.printer']);
+    $coversTask = collect(app(OrderPrintRouter::class)->tasks($order))
+        ->first(fn ($task): bool => $task->label === 'Coperti');
+
+    expect($coversTask->printer->name)->toBe('Cassa');
+});
+
+it('prints no covers ticket when the order has no covers', function () {
+    ['order' => $order] = orderWithCoversRoute(covers: 0);
+
+    $order->loadMissing(['lines.food.category.printRoutes', 'cashRegister.printer']);
+    $coversTasks = collect(app(OrderPrintRouter::class)->tasks($order))
+        ->filter(fn ($task): bool => $task->label === 'Coperti');
+
+    expect($coversTasks)->toBeEmpty();
+});
+
+it('omits the covers line from a product comanda header', function () {
+    $order = Order::factory()->create(['covers' => 4, 'table_number' => 12, 'number' => 7]);
+
+    $data = (new DepartmentTicket($order, [
+        ['name' => 'Panino', 'quantity' => 2, 'deviation' => '', 'note' => null],
+    ]))->render();
+
+    expect($data)->not->toContain('Coperti');
+});
+
+it('queues a dedicated print job for the covers ticket', function () {
+    Queue::fake();
+    ['order' => $order] = orderWithCoversRoute(covers: 4);
+
+    app(OrderPrinter::class)->print($order);
+
+    // Receipt + product comanda + covers comanda.
+    Queue::assertPushed(SendToPrinterJob::class, 3);
+    expect(PrintJob::where('order_id', $order->id)->where('label', 'Coperti')->count())->toBe(1);
 });
 
 it('renders a pickup stub with the event name, details and products, no prices', function () {
@@ -142,6 +233,49 @@ it('renders a pickup stub with the event name, details and products, no prices',
         ->toContain('#'.$order->number)
         ->toContain('2x Birra')
         ->not->toContain('5,00');
+});
+
+it('starts a table-less comanda straight at the details, with no leading feed', function () {
+    $order = Order::factory()->create(['table_number' => null, 'number' => 7]);
+
+    $data = (new DepartmentTicket($order, [
+        ['name' => 'Panino', 'quantity' => 1, 'deviation' => '', 'note' => null],
+    ]))->render();
+    $header = substr($data, 0, strpos($data, 'N. Ordine'));
+
+    expect($header)->not->toContain("\n")->not->toContain("\x1bd");
+});
+
+it('does not start the receipt with a blank gap when it has no header', function () {
+    ['order' => $order] = orderWithRoute();
+    $order->load('lines');
+
+    // Empty event name and no logo: nothing is printed above the details.
+    $data = (new CustomerReceipt($order, '', false, null))->render();
+    $header = substr($data, 0, strpos($data, 'N. Ordine'));
+
+    expect($header)->not->toContain("\x1bd\x02");
+});
+
+it('separates the receipt header from the details when it has an event name', function () {
+    ['order' => $order] = orderWithRoute();
+    $order->load('lines');
+
+    $data = (new CustomerReceipt($order, 'Sagra Test', false, null))->render();
+    $header = substr($data, 0, strpos($data, 'N. Ordine'));
+
+    expect($header)->toContain('Sagra Test')->toContain("\x1bd\x02");
+});
+
+it('does not start the pickup stub with a blank gap when it has no event name', function () {
+    ['order' => $order] = orderWithRoute();
+
+    $data = (new PickupStub($order, '', 'Bar', [
+        ['name' => 'Birra', 'quantity' => 2, 'deviation' => '', 'note' => null],
+    ]))->render();
+    $header = substr($data, 0, strpos($data, 'N. Ordine'));
+
+    expect($header)->not->toContain("\x1bd\x02");
 });
 
 it('routes a pickup stub to the register for a pickup order', function () {

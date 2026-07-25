@@ -23,6 +23,9 @@ use Illuminate\Support\Facades\Storage;
  */
 class OrderPrintRouter
 {
+    /** Label and line name for the standalone covers ticket. */
+    private const COVERS_LABEL = 'Coperti';
+
     /**
      * @return array<int, PrintTask>
      */
@@ -74,6 +77,28 @@ class OrderPrintRouter
                         }
                     }
                 }
+            }
+        }
+
+        // Covers (coperti) are a standalone print subject: when the order has
+        // covers, each covers route for this service type prints its own ticket
+        // with a single "N Coperti" line, independent of the product categories.
+        if (($order->covers ?? 0) > 0) {
+            $coverRoutes = PrintRoute::query()
+                ->where('for_covers', true)
+                ->where('service_type', $order->service_type)
+                ->with('printer')
+                ->orderBy('position')
+                ->get();
+
+            foreach ($coverRoutes as $route) {
+                $printer = $route->destination === PrintDestination::CashRegister
+                    ? $registerPrinter
+                    : $this->active($route->printer);
+
+                $tasks[] = $this->task($order, $route, $printer, self::COVERS_LABEL, $settings->eventName, [
+                    ['name' => self::COVERS_LABEL, 'quantity' => $order->covers, 'deviation' => '', 'note' => null],
+                ]);
             }
         }
 

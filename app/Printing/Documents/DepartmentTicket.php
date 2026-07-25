@@ -23,25 +23,60 @@ class DepartmentTicket extends Document
     {
         $order = $this->order;
 
-        // Order number, large and bold, centered.
-        $printer->setJustification(Printer::JUSTIFY_CENTER);
-        $printer->setEmphasis(true);
-        $printer->setTextSize(2, 2);
-        $printer->text("#{$order->number}\n");
-        $printer->setTextSize(1, 1);
-        $printer->setEmphasis(false);
-        $printer->setJustification(Printer::JUSTIFY_LEFT);
-
-        // Details section (table, customer, covers).
-        $printer->feed(1);
+        // Table box at the top: a box-drawing border around the "TAVOLO" label
+        // (1x1) over the table number (2x2), black on white and bold. Everything
+        // sits on the font A grid (each cell 12 dots wide) so the vertical
+        // borders stay aligned row by row; each row's line spacing is set to its
+        // own height so the border rectangle is continuous.
         if ($order->table_number !== null) {
-            $printer->text($this->columns('Tavolo', (string) $order->table_number));
+            $number = (string) $order->table_number;
+            // Interior width in font A columns: 10 by default, but never less
+            // than the 2x2 number (2 columns per digit) plus a column of margin
+            // each side, so a long number stays inside the border and centered.
+            $inner = max(10, mb_strlen($number) * 2 + 2);
+            $vertical = "\u{2502}";       // border side
+            $horizontal = "\u{2500}";     // border top/bottom
+
+            $printer->setJustification(Printer::JUSTIFY_CENTER);
+            $printer->setEmphasis(true);
+
+            // Top border.
+            $printer->setLineSpacing(24);
+            $printer->text("\u{250C}".str_repeat($horizontal, $inner)."\u{2510}\n");
+
+            // Label row (1x1), centered within the border.
+            $printer->text($vertical.str_pad('Tavolo', $inner, ' ', STR_PAD_BOTH).$vertical."\n");
+
+            // Number row: the 2x2 digits with single-width side padding so the
+            // number centres at single-column resolution; the side borders are
+            // double height to match the row.
+            $padding = max(0, $inner - mb_strlen($number) * 2);
+            $leftPad = intdiv($padding, 2);
+            $printer->setLineSpacing(48);
+            $printer->setTextSize(1, 2);
+            $printer->text($vertical.str_repeat(' ', $leftPad));
+            $printer->setTextSize(2, 2);
+            $printer->text($number);
+            $printer->setTextSize(1, 2);
+            $printer->text(str_repeat(' ', $padding - $leftPad).$vertical."\n");
+            $printer->setTextSize(1, 1);
+
+            // Bottom border.
+            $printer->setLineSpacing(24);
+            $printer->text("\u{2514}".str_repeat($horizontal, $inner)."\u{2518}\n");
+
+            $printer->setLineSpacing();
+            $printer->setEmphasis(false);
+            $printer->setJustification(Printer::JUSTIFY_LEFT);
+            $printer->feed(1);
         }
+
+        // Details section (order number, customer). Covers are not shown here:
+        // they are a standalone print subject with their own routed ticket. When
+        // there is no table box above, the ticket starts writing straight away.
+        $printer->text($this->columns('N. Ordine', "#{$order->number}"));
         if ($order->customer_name) {
             $printer->text($this->columns('Cliente', $order->customer_name));
-        }
-        if (($order->covers ?? 0) > 0) {
-            $printer->text($this->columns('Coperti', (string) $order->covers));
         }
 
         // Items between two separators, printed large (2x2).

@@ -1,6 +1,11 @@
 <?php
 
+use App\Enums\PrintDestination;
+use App\Enums\PrintJobType;
+use App\Enums\ServiceType;
 use App\Filament\Pages\ManageEventSettings;
+use App\Models\Printer;
+use App\Models\PrintRoute;
 use App\Models\User;
 use App\Settings\EventSettings;
 use Filament\Facades\Filament;
@@ -87,4 +92,64 @@ it('requires the event name', function () {
         ])
         ->call('save')
         ->assertHasFormErrors(['eventName' => 'required']);
+});
+
+it('loads the existing covers routes into the Coperti tab', function () {
+    $printer = Printer::factory()->create();
+    PrintRoute::factory()->forCovers()->create([
+        'service_type' => ServiceType::TableService,
+        'destination' => PrintDestination::DepartmentPrinter,
+        'printer_id' => $printer->id,
+        'position' => 1,
+    ]);
+
+    $state = Livewire::test(ManageEventSettings::class)->get('data');
+    $rows = array_values($state['coverRoutes_table_service']);
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows[0]['document'])->toBe(PrintJobType::DepartmentTicket->value)
+        ->and($rows[0]['destination'])->toBe(PrintDestination::DepartmentPrinter->value)
+        ->and($rows[0]['printer_id'])->toEqual($printer->id);
+});
+
+it('saves covers routes as standalone for_covers print routes', function () {
+    $printer = Printer::factory()->create();
+
+    Livewire::test(ManageEventSettings::class)
+        ->fillForm([
+            'eventName' => 'Sagra',
+            'coverCharge' => '2,00',
+            'coverRoutes_table_service' => [
+                ['document' => PrintJobType::DepartmentTicket->value, 'destination' => PrintDestination::DepartmentPrinter->value, 'printer_id' => $printer->id],
+            ],
+        ])
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $route = PrintRoute::where('for_covers', true)->sole();
+
+    expect($route->category_id)->toBeNull()
+        ->and($route->service_type)->toBe(ServiceType::TableService)
+        ->and($route->document)->toBe(PrintJobType::DepartmentTicket)
+        ->and($route->printer_id)->toEqual($printer->id)
+        ->and($route->position)->toBe(1);
+
+    // The route keys are not persisted as settings.
+    expect(app(EventSettings::class)->eventName)->toBe('Sagra');
+});
+
+it('replaces the existing covers routes on save', function () {
+    PrintRoute::factory()->forCovers()->create(['service_type' => ServiceType::TableService]);
+
+    Livewire::test(ManageEventSettings::class)
+        ->fillForm([
+            'eventName' => 'Sagra',
+            'coverCharge' => '1,00',
+            'coverRoutes_table_service' => [],
+            'coverRoutes_pickup' => [],
+        ])
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(PrintRoute::where('for_covers', true)->count())->toBe(0);
 });

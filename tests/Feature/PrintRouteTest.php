@@ -47,6 +47,21 @@ it('clears a stray printer on a cash register destination', function () {
     expect($route->fresh()->printer_id)->toBeNull();
 });
 
+it('keeps a standalone covers route without a category', function () {
+    $route = PrintRoute::factory()->forCovers()->create();
+
+    expect($route->fresh()->for_covers)->toBeTrue()
+        ->and($route->fresh()->category_id)->toBeNull();
+});
+
+it('never flags a category-bound route as a covers route', function () {
+    // A stray for_covers flag must not detach the route from its category.
+    $route = PrintRoute::factory()->create(['for_covers' => true]);
+
+    expect($route->fresh()->category_id)->not->toBeNull()
+        ->and($route->fresh()->for_covers)->toBeFalse();
+});
+
 it('is deleted together with its category', function () {
     $route = PrintRoute::factory()->create();
 

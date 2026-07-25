@@ -15,7 +15,7 @@ class PrintRoute extends Model
     /** @use HasFactory<PrintRouteFactory> */
     use HasFactory;
 
-    protected $fillable = ['category_id', 'service_type', 'destination', 'document', 'printer_id', 'grouped', 'position'];
+    protected $fillable = ['category_id', 'service_type', 'destination', 'document', 'printer_id', 'grouped', 'for_covers', 'position'];
 
     protected function casts(): array
     {
@@ -24,6 +24,7 @@ class PrintRoute extends Model
             'destination' => PrintDestination::class,
             'document' => PrintJobType::class,
             'grouped' => 'boolean',
+            'for_covers' => 'boolean',
             'position' => 'integer',
         ];
     }
@@ -35,6 +36,16 @@ class PrintRoute extends Model
             // register, so it never carries a fixed printer.
             if ($route->destination === PrintDestination::CashRegister) {
                 $route->printer_id = null;
+            }
+
+            // A category-bound route is never a covers route (category wins, so a
+            // stray flag never detaches it); a standalone covers route in turn
+            // carries no category.
+            if ($route->category_id !== null) {
+                $route->for_covers = false;
+            }
+            if ($route->for_covers) {
+                $route->category_id = null;
             }
         });
     }

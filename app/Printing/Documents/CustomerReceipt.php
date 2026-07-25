@@ -30,10 +30,12 @@ class CustomerReceipt extends Document
 
         // Header block, centered: logo, event name (large), order number.
         $printer->setJustification(Printer::JUSTIFY_CENTER);
+        $hasHeader = false;
 
         if (($logo = $this->logo()) !== null) {
             $printer->bitImage($logo);
             $printer->feed(1);
+            $hasHeader = true;
         }
 
         if ($this->eventName !== '') {
@@ -42,12 +44,16 @@ class CustomerReceipt extends Document
             $printer->text($this->eventName."\n");
             $printer->setTextSize(1, 1);
             $printer->setEmphasis(false);
+            $hasHeader = true;
         }
 
         $printer->setJustification(Printer::JUSTIFY_LEFT);
 
-        // Order details, separated from the header above by a blank gap.
-        $printer->feed(2);
+        // Order details, separated from the header by a blank gap only when a
+        // header was printed, so an empty header never starts with blank lines.
+        if ($hasHeader) {
+            $printer->feed(2);
+        }
         $printer->text($this->columns('N. Ordine', "#{$order->number}"));
         if ($order->table_number !== null) {
             $printer->text($this->columns('Tavolo', (string) $order->table_number));

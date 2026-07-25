@@ -28,17 +28,22 @@ class PickupStub extends Document
 
         // Header: event name (double height, single width), centered.
         $printer->setJustification(Printer::JUSTIFY_CENTER);
+        $hasHeader = false;
         if ($this->eventName !== '') {
             $printer->setEmphasis(true);
             $printer->setTextSize(1, 2);
             $printer->text($this->eventName."\n");
             $printer->setTextSize(1, 1);
             $printer->setEmphasis(false);
+            $hasHeader = true;
         }
         $printer->setJustification(Printer::JUSTIFY_LEFT);
 
-        // Details section, like the receipt.
-        $printer->feed(2);
+        // Details section, separated from the header only when one was printed,
+        // so an empty header never starts with blank lines.
+        if ($hasHeader) {
+            $printer->feed(2);
+        }
         $printer->text($this->columns('N. Ordine', "#{$order->number}"));
         $printer->text($this->columns('Ritiro', $this->station));
         if ($order->table_number !== null) {

@@ -11,6 +11,7 @@ use App\Models\EventDay;
 use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Printer;
+use App\Models\PrintRoute;
 use Illuminate\Database\Seeder;
 
 class DemoSeeder extends Seeder
@@ -71,6 +72,18 @@ class DemoSeeder extends Seeder
             // Only a pickup stub at the register for both service types.
             ['service_type' => ServiceType::TableService, 'document' => PrintJobType::PickupStub, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
             ['service_type' => ServiceType::Pickup, 'document' => PrintJobType::PickupStub, 'destination' => PrintDestination::CashRegister, 'printer_id' => null, 'grouped' => true, 'position' => 1],
+        ]);
+
+        // Covers (coperti): a standalone comanda at the kitchen for table service.
+        PrintRoute::create([
+            'category_id' => null,
+            'for_covers' => true,
+            'service_type' => ServiceType::TableService,
+            'document' => PrintJobType::DepartmentTicket,
+            'destination' => PrintDestination::DepartmentPrinter,
+            'printer_id' => $printers['Cucina']->id,
+            'grouped' => true,
+            'position' => 1,
         ]);
 
         // Ingredients (name => surcharge in cents).
