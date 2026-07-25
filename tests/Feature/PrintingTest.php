@@ -23,6 +23,7 @@ use App\Printing\Documents\PickupStub;
 use App\Printing\OrderPrinter;
 use App\Printing\OrderPrintRouter;
 use App\Printing\PrinterConnection;
+use App\Settings\EventSettings;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -233,6 +234,21 @@ it('renders a pickup stub with the event name, details and products, no prices',
         ->toContain('#'.$order->number)
         ->toContain('2x Birra')
         ->not->toContain('5,00');
+});
+
+it('prints the footer time in the configured timezone', function () {
+    $settings = app(EventSettings::class);
+    $settings->timezone = 'Europe/Rome';
+    $settings->save();
+
+    // Stored in UTC; 10:00 UTC is 12:00 in Rome (CEST, summer).
+    $order = Order::factory()->create(['paid_at' => '2026-07-25 10:00:00', 'number' => 5]);
+
+    $data = (new DepartmentTicket($order, [
+        ['name' => 'Panino', 'quantity' => 1, 'deviation' => '', 'note' => null],
+    ]))->render();
+
+    expect($data)->toContain('25/07/2026 12:00');
 });
 
 it('starts a table-less comanda straight at the details, with no leading feed', function () {

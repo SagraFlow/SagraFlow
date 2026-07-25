@@ -2,6 +2,8 @@
 
 namespace App\Printing\Documents;
 
+use App\Settings\EventSettings;
+use Illuminate\Support\Carbon;
 use Mike42\Escpos\PrintConnectors\MemoryPrintConnector;
 use Mike42\Escpos\Printer;
 
@@ -57,5 +59,19 @@ abstract class Document
     protected function money(int $cents): string
     {
         return '€ '.number_format($cents / 100, 2, ',', '.');
+    }
+
+    /**
+     * Formats a UTC timestamp in the event's configured timezone, empty when null.
+     */
+    protected function localDateTime(?Carbon $dateTime, string $format = 'd/m/Y H:i'): string
+    {
+        if ($dateTime === null) {
+            return '';
+        }
+
+        return $dateTime->copy()
+            ->setTimezone(app(EventSettings::class)->timezone)
+            ->format($format);
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Settings\EventSettings;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -10,6 +11,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Facades\FilamentTimezone;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -18,9 +20,22 @@ use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
+use Throwable;
 
 class AdminPanelProvider extends PanelProvider
 {
+    public function boot(): void
+    {
+        // Display all Filament dates/times in the event's configured timezone
+        // (stored in UTC). Guarded so migrations/console before the settings
+        // table exists keep the framework default.
+        try {
+            FilamentTimezone::set(app(EventSettings::class)->timezone);
+        } catch (Throwable) {
+            // Settings not available yet; keep the default timezone.
+        }
+    }
+
     public function panel(Panel $panel): Panel
     {
         return $panel

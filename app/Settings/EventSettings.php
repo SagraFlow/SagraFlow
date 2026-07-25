@@ -9,6 +9,12 @@ class EventSettings extends Settings
     public string $eventName;
 
     /**
+     * IANA timezone (e.g. Europe/Rome) used to display and print times, which
+     * are stored in UTC.
+     */
+    public string $timezone;
+
+    /**
      * Cover charge (coperto) stored as an integer amount of cents.
      */
     public int $coverCharge;

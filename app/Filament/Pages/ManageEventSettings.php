@@ -10,6 +10,7 @@ use App\Settings\EventSettings;
 use BackedEnum;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Pages\SettingsPage;
@@ -58,6 +59,12 @@ class ManageEventSettings extends SettingsPage
                                     ->label('Nome evento')
                                     ->required()
                                     ->maxLength(255),
+                                Select::make('timezone')
+                                    ->label('Fuso orario')
+                                    ->helperText('Usato per mostrare e stampare gli orari (salvati in UTC).')
+                                    ->options(array_combine(timezone_identifiers_list(), timezone_identifiers_list()))
+                                    ->searchable()
+                                    ->required(),
                                 FileUpload::make('logo')
                                     ->label('Logo scontrino')
                                     ->image()

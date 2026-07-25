@@ -1,6 +1,10 @@
 @php
     $money = fn (?int $cents): string => '€ '.number_format(($cents ?? 0) / 100, 2, '.', '');
 
+    $timezone = app(\App\Settings\EventSettings::class)->timezone;
+    $time = fn (?\Illuminate\Support\Carbon $dateTime): string => $dateTime
+        ?->copy()->setTimezone($timezone)->format('d/m/Y H:i') ?? '-';
+
     $groups = $order->lines
         ->sortBy(fn ($line) => $line->food?->category?->position ?? PHP_INT_MAX)
         ->groupBy(fn ($line) => $line->food?->category?->name ?? 'Senza categoria');
@@ -107,7 +111,7 @@
         </div>
         <div class="od-cell">
             <div class="od-cell-label">Data/Ora</div>
-            <div class="od-cell-value">{{ $order->paid_at?->format('d/m/Y H:i') ?? '-' }}</div>
+            <div class="od-cell-value">{{ $time($order->paid_at) }}</div>
         </div>
         <div class="od-cell">
             <div class="od-cell-label">Giornata</div>

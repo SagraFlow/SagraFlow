@@ -94,6 +94,19 @@ it('requires the event name', function () {
         ->assertHasFormErrors(['eventName' => 'required']);
 });
 
+it('saves the display timezone', function () {
+    Livewire::test(ManageEventSettings::class)
+        ->fillForm([
+            'eventName' => 'Sagra',
+            'coverCharge' => '1,00',
+            'timezone' => 'UTC',
+        ])
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(app(EventSettings::class)->timezone)->toBe('UTC');
+});
+
 it('loads the existing covers routes into the Coperti tab', function () {
     $printer = Printer::factory()->create();
     PrintRoute::factory()->forCovers()->create([

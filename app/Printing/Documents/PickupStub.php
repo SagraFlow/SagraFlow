@@ -70,7 +70,7 @@ class PickupStub extends Document
 
         // Footer: date/time on the left, order number on the right.
         $printer->feed(1);
-        $printer->text($this->columns($order->paid_at?->format('d/m/Y H:i') ?? '', "#{$order->number}"));
+        $printer->text($this->columns($this->localDateTime($order->paid_at), "#{$order->number}"));
 
         $printer->feed(2);
         $printer->cut();
