@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PrintJob extends Model
 {
-    protected $fillable = ['order_id', 'printer_id', 'printer_name', 'type', 'label', 'status', 'attempts', 'error', 'printed_at'];
+    protected $fillable = ['order_id', 'printer_id', 'printer_name', 'type', 'label', 'status', 'attempts', 'error', 'spec', 'queued_at', 'sent_at', 'printed_at'];
 
     protected function casts(): array
     {
@@ -17,6 +17,9 @@ class PrintJob extends Model
             'type' => PrintJobType::class,
             'status' => PrintJobStatus::class,
             'attempts' => 'integer',
+            'spec' => 'array',
+            'queued_at' => 'datetime',
+            'sent_at' => 'datetime',
             'printed_at' => 'datetime',
         ];
     }

@@ -21,24 +21,24 @@ class OrderPrinter
         $order->loadMissing(['lines.ingredients', 'lines.food.category.printRoutes', 'cashRegister.printer']);
 
         foreach ($this->router->tasks($order) as $task) {
+            $hasPrinter = $task->printer !== null;
+
             $printJob = PrintJob::create([
                 'order_id' => $order->id,
                 'printer_id' => $task->printer?->id,
                 'printer_name' => $task->printer?->name,
                 'type' => $task->type,
                 'label' => $task->label,
-                'status' => $task->printer !== null ? PrintJobStatus::Pending : PrintJobStatus::Failed,
-                'error' => $task->printer !== null ? null : 'Nessuna stampante attiva per questa destinazione.',
+                'status' => $hasPrinter ? PrintJobStatus::Pending : PrintJobStatus::Failed,
+                'error' => $hasPrinter ? null : 'Nessuna stampante attiva per questa destinazione.',
+                // Freeze the document spec (not the bytes) so the worker/reconciler
+                // can render it at send time from this row + the immutable order.
+                'spec' => $task->spec,
+                'queued_at' => $hasPrinter ? now() : null,
             ]);
 
-            if ($task->printer !== null) {
-                SendToPrinterJob::dispatch(
-                    $printJob->id,
-                    $task->printer->ip_address,
-                    $task->printer->port,
-                    // Base64 so the raw ESC/POS bytes survive JSON queue serialization.
-                    base64_encode($task->document->render()),
-                );
+            if ($hasPrinter) {
+                SendToPrinterJob::dispatchFor($printJob);
             }
         }
     }

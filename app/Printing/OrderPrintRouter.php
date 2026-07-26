@@ -9,11 +9,7 @@ use App\Models\Order;
 use App\Models\OrderLine;
 use App\Models\Printer;
 use App\Models\PrintRoute;
-use App\Printing\Documents\CustomerReceipt;
-use App\Printing\Documents\DepartmentTicket;
-use App\Printing\Documents\PickupStub;
 use App\Settings\EventSettings;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Resolves an order into the set of documents to print and where. The customer
@@ -39,12 +35,10 @@ class OrderPrintRouter
                 $registerPrinter,
                 PrintJobType::CustomerReceipt,
                 'Scontrino',
-                new CustomerReceipt(
-                    $order,
-                    $settings->eventName,
-                    $order->payment_method === PaymentMethod::Cash,
-                    $this->logoPath($settings->logo),
-                ),
+                [
+                    'eventName' => $settings->eventName,
+                    'openDrawer' => $order->payment_method === PaymentMethod::Cash,
+                ],
             ),
         ];
 
@@ -67,13 +61,13 @@ class OrderPrintRouter
                     : $this->active($route->printer);
 
                 if ($route->grouped) {
-                    $tasks[] = $this->task($order, $route, $printer, $category->name, $settings->eventName, $lines->map(
+                    $tasks[] = $this->task($route, $printer, $category->name, $settings->eventName, $lines->map(
                         fn (OrderLine $line): array => $this->item($line, $line->quantity),
                     )->all());
                 } else {
                     foreach ($lines as $line) {
                         foreach (range(1, $line->quantity) as $ignored) {
-                            $tasks[] = $this->task($order, $route, $printer, $category->name, $settings->eventName, [$this->item($line, 1)]);
+                            $tasks[] = $this->task($route, $printer, $category->name, $settings->eventName, [$this->item($line, 1)]);
                         }
                     }
                 }
@@ -96,7 +90,7 @@ class OrderPrintRouter
                     ? $registerPrinter
                     : $this->active($route->printer);
 
-                $tasks[] = $this->task($order, $route, $printer, self::COVERS_LABEL, $settings->eventName, [
+                $tasks[] = $this->task($route, $printer, self::COVERS_LABEL, $settings->eventName, [
                     ['name' => self::COVERS_LABEL, 'quantity' => $order->covers, 'deviation' => '', 'note' => null],
                 ]);
             }
@@ -108,30 +102,18 @@ class OrderPrintRouter
     /**
      * @param  array<int, array{name: string, quantity: int, deviation: string, note: ?string}>  $items
      */
-    private function task(Order $order, PrintRoute $route, ?Printer $printer, string $station, string $eventName, array $items): PrintTask
+    private function task(PrintRoute $route, ?Printer $printer, string $station, string $eventName, array $items): PrintTask
     {
-        $document = $route->document === PrintJobType::PickupStub
-            ? new PickupStub($order, $eventName, $station, $items)
-            : new DepartmentTicket($order, $items);
+        $spec = $route->document === PrintJobType::PickupStub
+            ? ['eventName' => $eventName, 'station' => $station, 'items' => $items]
+            : ['items' => $items];
 
-        return new PrintTask($printer, $route->document, $station, $document);
+        return new PrintTask($printer, $route->document, $station, $spec);
     }
 
     private function active(?Printer $printer): ?Printer
     {
         return $printer !== null && $printer->active ? $printer : null;
-    }
-
-    /**
-     * Absolute filesystem path of the receipt logo, or null when unset/missing.
-     */
-    private function logoPath(?string $logo): ?string
-    {
-        if ($logo === null || ! Storage::disk('public')->exists($logo)) {
-            return null;
-        }
-
-        return Storage::disk('public')->path($logo);
     }
 
     /**

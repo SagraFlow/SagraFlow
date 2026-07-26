@@ -15,12 +15,16 @@ enum PrintJobType: string implements HasLabel
     /** Customer claim stub (tagliandino) exchanged at a counter to collect the goods. */
     case PickupStub = 'pickup_stub';
 
+    /** Diagnostic ticket triggered from the admin panel (no order). */
+    case Test = 'test';
+
     public function getLabel(): string
     {
         return match ($this) {
             self::CustomerReceipt => 'Scontrino',
             self::DepartmentTicket => 'Comanda',
             self::PickupStub => 'Tagliandino di ritiro',
+            self::Test => 'Test di stampa',
         };
     }
 

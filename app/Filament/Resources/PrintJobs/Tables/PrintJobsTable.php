@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PrintJobs\Tables;
 
 use App\Enums\PrintJobStatus;
 use App\Enums\PrintJobType;
+use App\Jobs\SendToPrinterJob;
 use App\Models\PrintJob;
 use App\Printing\OrderPrinter;
 use Filament\Actions\Action;
@@ -21,6 +22,7 @@ class PrintJobsTable
     {
         return $table
             ->defaultSort('created_at', 'desc')
+            ->poll('10s')
             ->columns([
                 TextColumn::make('created_at')
                     ->label('Data/Ora')
@@ -29,6 +31,7 @@ class PrintJobsTable
                 TextColumn::make('order.number')
                     ->label('Ordine')
                     ->prefix('#')
+                    ->placeholder('-')
                     ->sortable(),
                 TextColumn::make('type')
                     ->label('Documento')
@@ -62,6 +65,42 @@ class PrintJobsTable
                     ->options(PrintJobType::class),
             ])
             ->recordActions([
+                Action::make('cancel')
+                    ->label('Annulla')
+                    ->icon(Heroicon::OutlinedXMark)
+                    ->color('gray')
+                    ->requiresConfirmation()
+                    ->modalHeading('Annulla stampa')
+                    ->modalDescription('La stampa verrà annullata e non verrà inviata.')
+                    ->visible(fn (PrintJob $record): bool => in_array($record->status, [PrintJobStatus::Pending, PrintJobStatus::Held], true))
+                    ->action(function (PrintJob $record): void {
+                        // Same atomic guard as the worker's claim: only cancel a job
+                        // that has not been picked up or completed. A queued job then
+                        // finds the status un-claimable and no-ops.
+                        $cancelled = PrintJob::whereKey($record->id)
+                            ->whereIn('status', [PrintJobStatus::Pending, PrintJobStatus::Held])
+                            ->update(['status' => PrintJobStatus::Cancelled]);
+
+                        Notification::make()
+                            ->title($cancelled ? 'Stampa annullata' : 'La stampa era già in corso o completata')
+                            ->{$cancelled ? 'success' : 'warning'}()
+                            ->send();
+                    }),
+                Action::make('reprint')
+                    ->label('Ristampa')
+                    ->icon(Heroicon::OutlinedArrowPath)
+                    ->visible(fn (PrintJob $record): bool => $record->printer_id !== null
+                        && $record->status !== PrintJobStatus::Sending)
+                    ->action(function (PrintJob $record): void {
+                        // Reset so the job's atomic claim can pick it up again.
+                        $record->update(['status' => PrintJobStatus::Pending, 'error' => null]);
+                        SendToPrinterJob::dispatchFor($record);
+
+                        Notification::make()
+                            ->success()
+                            ->title('Stampa rimessa in coda')
+                            ->send();
+                    }),
                 Action::make('reprintOrder')
                     ->label('Ristampa ordine')
                     ->icon(Heroicon::OutlinedPrinter)

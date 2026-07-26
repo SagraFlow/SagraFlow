@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -11,6 +12,13 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withSchedule(function (Schedule $schedule): void {
+        // Printer health heartbeat + queue reconciliation.
+        $schedule->command('printers:poll')->everyFifteenSeconds()->withoutOverlapping();
+        $schedule->command('print:reconcile')->everyMinute()->withoutOverlapping();
+        // Populate the Horizon metrics dashboard.
+        $schedule->command('horizon:snapshot')->everyFiveMinutes();
+    })
     ->withMiddleware(function (Middleware $middleware): void {
         // Reuse the Filament panel login for guarded web pages (e.g. the POS).
         $middleware->redirectGuestsTo(fn () => route('filament.admin.auth.login'));

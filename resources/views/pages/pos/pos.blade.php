@@ -5,6 +5,7 @@
         @include('pos.partials.register-picker')
     @else
         @include('pos.partials.header')
+        @include('pos.partials.printer-alert')
 
         <div class="flex flex-1 overflow-hidden">
             @include('pos.partials.menu')

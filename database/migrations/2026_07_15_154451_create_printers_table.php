@@ -17,6 +17,12 @@ return new class extends Migration
             $table->string('ip_address', 45);
             $table->unsignedInteger('port');
             $table->boolean('active')->default(true);
+            // Health, updated by the status probe / health poll.
+            $table->string('status')->default('unknown');
+            $table->string('status_detail')->nullable();
+            $table->timestamp('status_changed_at')->nullable();
+            $table->timestamp('last_checked_at')->nullable();
+            $table->text('last_error')->nullable();
             $table->timestamps();
 
             $table->unique(['ip_address', 'port']);

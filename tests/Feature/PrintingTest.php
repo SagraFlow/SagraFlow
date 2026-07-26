@@ -2,6 +2,7 @@
 
 use App\Enums\PaymentMethod;
 use App\Enums\PrintDestination;
+use App\Enums\PrinterStatus;
 use App\Enums\PrintJobStatus;
 use App\Enums\PrintJobType;
 use App\Enums\ServiceType;
@@ -17,6 +18,7 @@ use App\Models\Printer;
 use App\Models\PrintJob;
 use App\Models\PrintRoute;
 use App\Models\User;
+use App\Printing\DocumentFactory;
 use App\Printing\Documents\CustomerReceipt;
 use App\Printing\Documents\DepartmentTicket;
 use App\Printing\Documents\PickupStub;
@@ -176,7 +178,8 @@ it('routes a covers ticket to its configured printer, listing the covers count',
     expect($coversTask)->not->toBeNull()
         ->and($coversTask->type)->toBe(PrintJobType::DepartmentTicket)
         ->and($coversTask->printer->id)->toBe($coversPrinter->id)
-        ->and($coversTask->document->render())->toContain('4x Coperti');
+        ->and($coversTask->spec['items'][0]['name'])->toBe('Coperti')
+        ->and($coversTask->spec['items'][0]['quantity'])->toBe(4);
 });
 
 it('resolves a covers route to the register printer for a cash-register destination', function () {
@@ -389,35 +392,94 @@ it('records a failed print job without queuing when no printer is available', fu
     expect(PrintJob::where('order_id', $order->id)->where('status', PrintJobStatus::Failed)->count())->toBe(2);
 });
 
-it('marks the print job printed once the bytes are sent', function () {
-    $order = Order::factory()->create();
-    $printJob = PrintJob::create([
-        'order_id' => $order->id,
-        'type' => PrintJobType::CustomerReceipt,
-        'label' => 'Scontrino',
+/**
+ * A Pending comanda PrintJob bound to a printer, with a frozen render spec.
+ */
+function pendingPrintJob(array $printerAttributes = []): PrintJob
+{
+    $printer = Printer::factory()->create([...['ip_address' => '1.2.3.4', 'port' => 9100], ...$printerAttributes]);
+
+    return PrintJob::create([
+        'order_id' => Order::factory()->create()->id,
+        'printer_id' => $printer->id,
+        'printer_name' => $printer->name,
+        'type' => PrintJobType::DepartmentTicket,
+        'label' => 'Comanda',
         'status' => PrintJobStatus::Pending,
+        'spec' => ['items' => [['name' => 'Panino', 'quantity' => 1, 'deviation' => '', 'note' => null]]],
     ]);
+}
+
+it('marks the print job printed after a successful send to a ready printer', function () {
+    $printJob = pendingPrintJob();
 
     $connection = Mockery::mock(PrinterConnection::class);
-    $connection->shouldReceive('send')->once()->with('1.2.3.4', 9100, 'BYTES');
+    $connection->shouldReceive('probe')->once()->andReturn(PrinterStatus::Ready);
+    // The worker renders the document from the spec at send time.
+    $connection->shouldReceive('send')->once()->with('1.2.3.4', 9100, Mockery::type('string'));
 
-    (new SendToPrinterJob($printJob->id, '1.2.3.4', 9100, base64_encode('BYTES')))->handle($connection);
+    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Printed)
-        ->and($printJob->fresh()->printed_at)->not->toBeNull();
+        ->and($printJob->fresh()->printed_at)->not->toBeNull()
+        ->and($printJob->fresh()->sent_at)->not->toBeNull();
 });
 
-it('marks the print job failed when the printer is unreachable', function () {
-    $order = Order::factory()->create();
-    $printJob = PrintJob::create([
-        'order_id' => $order->id,
-        'type' => PrintJobType::CustomerReceipt,
-        'label' => 'Scontrino',
-        'status' => PrintJobStatus::Pending,
-    ]);
+it('holds the print job and never sends when the printer is not ready', function () {
+    $printJob = pendingPrintJob();
 
-    (new SendToPrinterJob($printJob->id, '1.2.3.4', 9100, 'BYTES'))
-        ->failed(new PrinterException('Stampante offline'));
+    $connection = Mockery::mock(PrinterConnection::class);
+    $connection->shouldReceive('probe')->once()->andReturn(PrinterStatus::PaperOut);
+    $connection->shouldReceive('send')->never();
+
+    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+
+    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Held)
+        ->and($printJob->printer->fresh()->status)->toBe(PrinterStatus::PaperOut);
+});
+
+it('parks the job as held when the send fails, so a print is never lost', function () {
+    $printJob = pendingPrintJob();
+
+    $connection = Mockery::mock(PrinterConnection::class);
+    $connection->shouldReceive('probe')->once()->andReturn(PrinterStatus::Ready);
+    $connection->shouldReceive('send')->once()->andThrow(new PrinterException('Stampante offline'));
+
+    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+
+    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Held);
+});
+
+it('is a no-op when the job was already claimed by another worker', function () {
+    $printJob = pendingPrintJob();
+    $printJob->update(['status' => PrintJobStatus::Sending]); // already claimed
+
+    $connection = Mockery::mock(PrinterConnection::class);
+    $connection->shouldReceive('probe')->never();
+    $connection->shouldReceive('send')->never();
+
+    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+
+    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Sending);
+});
+
+it('never sends a cancelled job', function () {
+    $printJob = pendingPrintJob();
+    $printJob->update(['status' => PrintJobStatus::Cancelled]);
+
+    $connection = Mockery::mock(PrinterConnection::class);
+    $connection->shouldReceive('probe')->never();
+    $connection->shouldReceive('send')->never();
+
+    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+
+    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Cancelled);
+});
+
+it('marks the print job failed when the job ultimately fails', function () {
+    $printJob = pendingPrintJob();
+
+    (new SendToPrinterJob($printJob->id))->failed(new PrinterException('Stampante offline'));
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Failed)
         ->and($printJob->fresh()->error)->toContain('offline');

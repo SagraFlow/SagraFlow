@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\PrinterStatus;
 use App\Exceptions\PrinterException;
 use App\Models\Concerns\Activatable;
 use App\Models\Concerns\NormalizesName;
@@ -17,16 +18,38 @@ class Printer extends Model
 
     /** @use HasFactory<PrinterFactory> */
     use HasFactory;
+
     use NormalizesName;
 
-    protected $fillable = ['name', 'ip_address', 'port', 'active'];
+    protected $fillable = ['name', 'ip_address', 'port', 'active', 'status', 'status_detail', 'status_changed_at', 'last_checked_at', 'last_error'];
 
     protected function casts(): array
     {
         return [
             'active' => 'boolean',
             'port' => 'integer',
+            'status' => PrinterStatus::class,
+            'status_changed_at' => 'datetime',
+            'last_checked_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Records the outcome of a status probe, stamping status_changed_at only
+     * when the status actually changes (so grace timers are measured from the
+     * moment the printer entered the state).
+     */
+    public function recordStatus(PrinterStatus $status, ?string $detail = null): void
+    {
+        $changed = $this->status !== $status;
+
+        $this->forceFill([
+            'status' => $status,
+            'status_detail' => $detail,
+            'last_checked_at' => now(),
+            'status_changed_at' => $changed ? now() : $this->status_changed_at,
+            'last_error' => $status === PrinterStatus::Ready ? null : ($detail ?? $this->last_error),
+        ])->save();
     }
 
     protected static function booted(): void

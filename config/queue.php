@@ -69,7 +69,9 @@ return [
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
-            'block_for' => null,
+            // Blocking pop: the worker is woken the instant a job arrives instead
+            // of polling, so print pickup latency drops to milliseconds.
+            'block_for' => (int) env('REDIS_QUEUE_BLOCK_FOR', 5),
             'after_commit' => false,
         ],
 

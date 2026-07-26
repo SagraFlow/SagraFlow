@@ -2,14 +2,20 @@
 
 use App\Enums\DiscountType;
 use App\Enums\PaymentMethod;
+use App\Enums\PrintJobStatus;
 use App\Exceptions\OrderException;
+use App\Exceptions\PrinterException;
 use App\Models\CashRegister;
 use App\Models\Category;
 use App\Models\EventDay;
 use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Order;
+use App\Models\Printer;
+use App\Models\PrintJob;
+use App\Printing\Documents\DrawerKick;
 use App\Printing\OrderPrinter;
+use App\Printing\PrinterConnection;
 use App\Settings\EventSettings;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -96,6 +102,68 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         return $this->cashRegisterId !== null
             ? CashRegister::active()->find($this->cashRegisterId)
             : null;
+    }
+
+    /**
+     * A warning for the cashier about the printers relevant to their work, or
+     * null when all is well. Relevant = this register's own printer plus every
+     * shared department printer (kitchen/bar) - a broken department printer means
+     * the comande won't come out - but not the other registers' printers. Polled
+     * by the POS header so problems surface within seconds.
+     *
+     * @return array{level: string, message: string}|null
+     */
+    #[Computed]
+    public function printerAlert(): ?array
+    {
+        $registerPrinterId = $this->cashRegister?->printer_id;
+
+        $printers = Printer::query()
+            ->active()
+            ->where(function ($query) use ($registerPrinterId): void {
+                $query->whereDoesntHave('cashRegister'); // department printers
+
+                if ($registerPrinterId !== null) {
+                    $query->orWhere('id', $registerPrinterId); // this register's own
+                }
+            })
+            ->get()
+            // This register's own printer first, then the rest alphabetically.
+            ->sortBy(fn (Printer $printer): array => [
+                $printer->id === $registerPrinterId ? 0 : 1,
+                $printer->name,
+            ])
+            ->values();
+
+        if ($printers->isEmpty()) {
+            return null;
+        }
+
+        $inError = $printers->filter(fn (Printer $printer): bool => ! $printer->status->canPrint());
+
+        if ($inError->isNotEmpty()) {
+            $names = $inError
+                ->map(fn (Printer $printer): string => "{$printer->name} ({$printer->status->getLabel()})")
+                ->implode(', ');
+
+            return [
+                'level' => 'danger',
+                'message' => ($inError->count() > 1 ? 'Stampanti non pronte: ' : 'Stampante non pronta: ').$names,
+            ];
+        }
+
+        // Only Held jobs (waiting to retry) are actionable; Failed are terminal
+        // and belong to the admin log, not a permanent banner on the till.
+        $waiting = PrintJob::query()
+            ->whereIn('printer_id', $printers->pluck('id'))
+            ->where('status', PrintJobStatus::Held)
+            ->count();
+
+        if ($waiting > 0) {
+            return ['level' => 'warning', 'message' => "{$waiting} stampe in attesa"];
+        }
+
+        return null;
     }
 
     /**
@@ -262,12 +330,25 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     }
 
     /**
-     * Open the cash drawer. No-op until printing is wired up: the drawer is
-     * kicked via an ESC/POS pulse sent to the register's local printer.
+     * Kick the cash drawer via an ESC/POS pulse to the register's local printer.
+     * Sent synchronously (not queued) so the drawer pops instantly on press; a
+     * failure surfaces as a message instead of failing silently.
      */
     public function openCashDrawer(): void
     {
-        // TODO: send the drawer-kick command to $this->cashRegister->printer.
+        $printer = $this->cashRegister?->printer;
+
+        if ($printer === null) {
+            $this->dispatch('drawer-failed', message: 'Nessuna stampante associata alla cassa.');
+
+            return;
+        }
+
+        try {
+            app(PrinterConnection::class)->send($printer->ip_address, $printer->port, (new DrawerKick)->render(), timeout: 3);
+        } catch (PrinterException) {
+            $this->dispatch('drawer-failed', message: 'Impossibile aprire il cassetto: stampante non raggiungibile.');
+        }
     }
 
     public function updatedTableNumber(): void
