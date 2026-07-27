@@ -11,8 +11,9 @@ use Illuminate\Support\Facades\Cache;
 /**
  * Notifies staff about printer problems, with a policy by error type: offline
  * alerts immediately; a reachable-but-not-ready printer (paper out / cover /
- * error) alerts only after a grace period, then re-alerts at intervals. A
- * printer that recovers clears its alert so the next problem alerts at once.
+ * error) alerts only after a grace period. Alerts are edge-triggered: they fire
+ * once per outage and are re-armed only when the printer recovers, so a
+ * persistent fault never re-notifies.
  */
 class PrinterAlerts
 {
