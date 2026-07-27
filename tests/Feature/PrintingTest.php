@@ -228,14 +228,12 @@ it('queues a dedicated print job for the covers ticket', function () {
 it('renders a pickup stub with the event name, details and products, no prices', function () {
     ['order' => $order] = orderWithRoute();
 
-    $data = (new PickupStub($order, 'Sagra Test', 'Bar', [
+    $data = (new PickupStub($order, 'Sagra Test', [
         ['name' => 'Birra', 'quantity' => 2, 'deviation' => '', 'note' => null],
     ]))->render();
 
     expect($data)
         ->toContain('Sagra Test')
-        ->toContain('N. Ordine')
-        ->toContain('Bar')
         ->toContain('#'.$order->number)
         ->toContain('2x Birra')
         ->not->toContain('5,00');
@@ -286,9 +284,8 @@ it('prints a Ritiro banner on a table-less comanda instead of a table box', func
     $data = (new DepartmentTicket($order, [
         ['name' => 'Panino', 'quantity' => 1, 'deviation' => '', 'note' => null],
     ]))->render();
-    $header = substr($data, 0, strpos($data, 'N. Ordine'));
 
-    expect($header)->toContain('Ritiro')->not->toContain('Tavolo');
+    expect($data)->toContain('Ritiro')->not->toContain('Tavolo');
 });
 
 it('does not start the receipt with a blank gap when it has no header', function () {
@@ -297,7 +294,8 @@ it('does not start the receipt with a blank gap when it has no header', function
 
     // Empty event name and no logo: nothing is printed above the details.
     $data = (new CustomerReceipt($order, '', false, null))->render();
-    $header = substr($data, 0, strpos($data, 'N. Ordine'));
+    // The body starts at the first rule (a run of 0xC4, the encoded U+2500).
+    $header = substr($data, 0, strpos($data, str_repeat("\xc4", 10)));
 
     expect($header)->not->toContain("\x1bd\x02");
 });
@@ -307,7 +305,8 @@ it('separates the receipt header from the details when it has an event name', fu
     $order->load('lines');
 
     $data = (new CustomerReceipt($order, 'Sagra Test', false, null))->render();
-    $header = substr($data, 0, strpos($data, 'N. Ordine'));
+    // The body starts at the first rule (a run of 0xC4, the encoded U+2500).
+    $header = substr($data, 0, strpos($data, str_repeat("\xc4", 10)));
 
     expect($header)->toContain('Sagra Test')->toContain("\x1bd\x02");
 });
@@ -315,10 +314,11 @@ it('separates the receipt header from the details when it has an event name', fu
 it('does not start the pickup stub with a blank gap when it has no event name', function () {
     ['order' => $order] = orderWithRoute();
 
-    $data = (new PickupStub($order, '', 'Bar', [
+    $data = (new PickupStub($order, '', [
         ['name' => 'Birra', 'quantity' => 2, 'deviation' => '', 'note' => null],
     ]))->render();
-    $header = substr($data, 0, strpos($data, 'N. Ordine'));
+    // The body starts at the first rule (a run of 0xC4, the encoded U+2500).
+    $header = substr($data, 0, strpos($data, str_repeat("\xc4", 10)));
 
     expect($header)->not->toContain("\x1bd\x02");
 });

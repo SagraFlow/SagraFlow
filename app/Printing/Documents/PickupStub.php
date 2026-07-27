@@ -18,7 +18,6 @@ class PickupStub extends Document
     public function __construct(
         private Order $order,
         private string $eventName,
-        private string $station,
         private array $items,
     ) {}
 
@@ -44,8 +43,6 @@ class PickupStub extends Document
         if ($hasHeader) {
             $printer->feed(2);
         }
-        $printer->text($this->columns('N. Ordine', "#{$order->number}"));
-        $printer->text($this->columns('Ritiro', $this->station));
         if ($order->table_number !== null) {
             $printer->text($this->columns('Tavolo', (string) $order->table_number));
         }

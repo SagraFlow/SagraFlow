@@ -39,7 +39,6 @@ class DocumentFactory
             PrintJobType::PickupStub => new PickupStub(
                 $this->requireOrder($order, $type),
                 $spec['eventName'] ?? '',
-                $spec['station'] ?? '',
                 $spec['items'] ?? [],
             ),
             PrintJobType::Test => new TestTicket(

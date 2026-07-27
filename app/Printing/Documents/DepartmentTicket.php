@@ -32,9 +32,9 @@ class DepartmentTicket extends Document
             $this->drawTopBox($printer, null, 'Ritiro');
         }
 
-        // Details section (order number, customer). Covers are not shown here:
-        // they are a standalone print subject with their own routed ticket.
-        $printer->text($this->columns('N. Ordine', "#{$order->number}"));
+        // Details section (customer only). Covers are not shown here: they are
+        // a standalone print subject with their own routed ticket. The order
+        // number is not repeated here - it is in the footer.
         if ($order->customer_name) {
             $printer->text($this->columns('Cliente', $order->customer_name));
         }

@@ -48,7 +48,6 @@ class CustomerReceipt extends Document
         if ($hasHeader) {
             $printer->feed(2);
         }
-        $printer->text($this->columns('N. Ordine', "#{$order->number}"));
         if ($order->table_number !== null) {
             $printer->text($this->columns('Tavolo', (string) $order->table_number));
         }

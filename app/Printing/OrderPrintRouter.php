@@ -104,8 +104,10 @@ class OrderPrintRouter
      */
     private function task(PrintRoute $route, ?Printer $printer, string $station, string $eventName, array $items): PrintTask
     {
+        // The pickup stub needs the event name for its header; the station is
+        // not printed (it stays only as the PrintTask/PrintJob label).
         $spec = $route->document === PrintJobType::PickupStub
-            ? ['eventName' => $eventName, 'station' => $station, 'items' => $items]
+            ? ['eventName' => $eventName, 'items' => $items]
             : ['items' => $items];
 
         return new PrintTask($printer, $route->document, $station, $spec);
