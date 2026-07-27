@@ -3,10 +3,7 @@
 namespace App\Printing\Documents;
 
 use App\Models\Order;
-use Mike42\Escpos\EscposImage;
-use Mike42\Escpos\GdEscposImage;
 use Mike42\Escpos\Printer;
-use Throwable;
 
 /**
  * Customer receipt (scontrino) printed at the ordering register: full order
@@ -14,9 +11,6 @@ use Throwable;
  */
 class CustomerReceipt extends Document
 {
-    /** Max logo width in dots (about half the 80mm printable width). */
-    private const LOGO_WIDTH = 256;
-
     public function __construct(
         private Order $order,
         private string $eventName,
@@ -32,7 +26,7 @@ class CustomerReceipt extends Document
         $printer->setJustification(Printer::JUSTIFY_CENTER);
         $hasHeader = false;
 
-        if (($logo = $this->logo()) !== null) {
+        if (($logo = $this->logoImage($this->logoPath)) !== null) {
             $printer->bitImage($logo);
             $printer->feed(1);
             $hasHeader = true;
@@ -115,42 +109,5 @@ class CustomerReceipt extends Document
             $printer->pulse();
         }
         $printer->cut();
-    }
-
-    /**
-     * Load the configured logo, downscaled to the paper width. Returns null
-     * (and never throws) when there is no logo or it cannot be processed, so a
-     * bad image never blocks the receipt.
-     */
-    private function logo(): ?EscposImage
-    {
-        if ($this->logoPath === null || ! is_file($this->logoPath)) {
-            return null;
-        }
-
-        try {
-            $source = @imagecreatefromstring((string) file_get_contents($this->logoPath));
-
-            if ($source === false) {
-                return null;
-            }
-
-            $width = imagesx($source);
-            $height = imagesy($source);
-            $targetWidth = min($width, self::LOGO_WIDTH);
-            $targetHeight = max(1, (int) round($height * $targetWidth / $width));
-
-            // Flatten onto white (handles transparency) and downscale to the paper width.
-            $canvas = imagecreatetruecolor($targetWidth, $targetHeight);
-            imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
-            imagecopyresampled($canvas, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
-
-            $image = new GdEscposImage;
-            $image->readImageFromGdResource($canvas);
-
-            return $image;
-        } catch (Throwable) {
-            return null;
-        }
     }
 }

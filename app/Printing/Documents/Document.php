@@ -4,8 +4,11 @@ namespace App\Printing\Documents;
 
 use App\Settings\EventSettings;
 use Illuminate\Support\Carbon;
+use Mike42\Escpos\EscposImage;
+use Mike42\Escpos\GdEscposImage;
 use Mike42\Escpos\PrintConnectors\MemoryPrintConnector;
 use Mike42\Escpos\Printer;
+use Throwable;
 
 /**
  * Base ESC/POS document. Subclasses describe their content in build(); render()
@@ -16,6 +19,9 @@ abstract class Document
 {
     /** Character columns for an 80mm receipt at font A. */
     protected const WIDTH = 48;
+
+    /** Max logo width in dots (about half the 80mm printable width). */
+    protected const LOGO_WIDTH = 256;
 
     abstract protected function build(Printer $printer): void;
 
@@ -126,5 +132,42 @@ abstract class Document
         return $dateTime->copy()
             ->setTimezone(app(EventSettings::class)->timezone)
             ->format($format);
+    }
+
+    /**
+     * Loads a logo image downscaled to the paper width, ready for bitImage().
+     * Returns null (and never throws) when the path is empty/missing or the
+     * image cannot be processed, so a bad logo never blocks a document.
+     */
+    protected function logoImage(?string $logoPath): ?EscposImage
+    {
+        if ($logoPath === null || ! is_file($logoPath)) {
+            return null;
+        }
+
+        try {
+            $source = @imagecreatefromstring((string) file_get_contents($logoPath));
+
+            if ($source === false) {
+                return null;
+            }
+
+            $width = imagesx($source);
+            $height = imagesy($source);
+            $targetWidth = min($width, static::LOGO_WIDTH);
+            $targetHeight = max(1, (int) round($height * $targetWidth / $width));
+
+            // Flatten onto white (handles transparency) and downscale to the paper width.
+            $canvas = imagecreatetruecolor($targetWidth, $targetHeight);
+            imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+            imagecopyresampled($canvas, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
+
+            $image = new GdEscposImage;
+            $image->readImageFromGdResource($canvas);
+
+            return $image;
+        } catch (Throwable) {
+            return null;
+        }
     }
 }

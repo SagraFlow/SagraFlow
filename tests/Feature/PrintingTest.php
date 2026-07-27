@@ -22,6 +22,7 @@ use App\Printing\DocumentFactory;
 use App\Printing\Documents\CustomerReceipt;
 use App\Printing\Documents\DepartmentTicket;
 use App\Printing\Documents\PickupStub;
+use App\Printing\Documents\TestTicket;
 use App\Printing\OrderPrinter;
 use App\Printing\OrderPrintRouter;
 use App\Printing\PrinterConnection;
@@ -238,6 +239,30 @@ it('renders a pickup stub with the event name, details and products, no prices',
         ->toContain('#'.$order->number)
         ->toContain('2x Birra')
         ->not->toContain('5,00');
+});
+
+it('renders a test ticket in the receipt style with a large Stampa di prova', function () {
+    $data = (new TestTicket('Sagra Test', 'Cucina'))->render();
+
+    expect($data)
+        ->toContain('Sagra Test')
+        ->toContain('Stampa di prova')
+        ->toContain('Cucina');
+});
+
+it('prints the configured logo on the test ticket', function () {
+    $path = tempnam(sys_get_temp_dir(), 'logo').'.png';
+    $image = imagecreatetruecolor(120, 60);
+    imagefilledrectangle($image, 0, 0, 119, 59, imagecolorallocate($image, 0, 0, 0));
+    imagepng($image, $path);
+    imagedestroy($image);
+
+    $withLogo = (new TestTicket('Sagra Test', 'Cucina', $path))->render();
+    $withoutLogo = (new TestTicket('Sagra Test', 'Cucina', null))->render();
+
+    expect(strlen($withLogo))->toBeGreaterThan(strlen($withoutLogo));
+
+    @unlink($path);
 });
 
 it('prints the footer time in the configured timezone', function () {

@@ -45,6 +45,7 @@ class DocumentFactory
             PrintJobType::Test => new TestTicket(
                 $spec['eventName'] ?? '',
                 $spec['printerName'] ?? '',
+                $this->logoPath(),
             ),
         };
     }
