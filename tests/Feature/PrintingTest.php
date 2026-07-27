@@ -130,6 +130,7 @@ it('renders a department ticket without prices', function () {
         ->toContain('Tavolo')
         ->toContain((string) $order->table_number)
         ->toContain('2x Panino')
+        ->not->toContain('Ritiro')
         ->not->toContain('5,00');
 });
 
@@ -254,7 +255,7 @@ it('prints the footer time in the configured timezone', function () {
     expect($data)->toContain('25/07/2026 12:00');
 });
 
-it('starts a table-less comanda straight at the details, with no leading feed', function () {
+it('prints a Ritiro banner on a table-less comanda instead of a table box', function () {
     $order = Order::factory()->create(['table_number' => null, 'number' => 7]);
 
     $data = (new DepartmentTicket($order, [
@@ -262,7 +263,7 @@ it('starts a table-less comanda straight at the details, with no leading feed', 
     ]))->render();
     $header = substr($data, 0, strpos($data, 'N. Ordine'));
 
-    expect($header)->not->toContain("\n")->not->toContain("\x1bd");
+    expect($header)->toContain('Ritiro')->not->toContain('Tavolo');
 });
 
 it('does not start the receipt with a blank gap when it has no header', function () {
