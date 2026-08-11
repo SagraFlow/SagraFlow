@@ -8,6 +8,7 @@ use App\Models\EventDay;
 use App\Models\Food;
 use App\Models\Ingredient;
 use App\Models\Order;
+use App\Models\StockReservation;
 use App\Models\User;
 use App\Settings\EventSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -713,4 +714,426 @@ it('falls back from card to cash payment', function () {
         ->assertHasNoErrors();
 
     expect(Order::first()->payment_method->value)->toBe('cash');
+});
+
+it('shows a food as sold out and blocks adding it when a tracked ingredient is exhausted', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'name' => 'Panino']);
+    $salsiccia = Ingredient::factory()->tracked(0)->create(['name' => 'Salsiccia']);
+    $food->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('Esaurito')
+        ->call('addFood', $food->id);
+
+    expect($component->get('cart'))->toBeEmpty();
+});
+
+it('blocks adding more portions than the tracked stock allows', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id]);
+    $salsiccia = Ingredient::factory()->tracked(1)->create();
+    $food->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)   // ok: consumes the only unit
+        ->call('addFood', $food->id);  // blocked: stock exhausted
+
+    expect($component->get('cart'))->toHaveCount(1)
+        ->and(collect($component->get('cart'))->first()['quantity'])->toBe(1);
+});
+
+it('blocks incrementing a cart line beyond the tracked stock', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id]);
+    $ingredient = Ingredient::factory()->tracked(1)->create();
+    $food->ingredients()->attach($ingredient->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+
+    $key = array_key_first($component->get('cart'));
+    $component->call('incrementLine', $key);
+
+    expect(collect($component->get('cart'))->first()['quantity'])->toBe(1);
+});
+
+it('marks a food sold out when a shared ingredient is used up by another food in the cart', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $panino = Food::factory()->create(['category_id' => $category->id, 'name' => 'Panino']);
+    $piadina = Food::factory()->create(['category_id' => $category->id, 'name' => 'Piadina']);
+    $salsiccia = Ingredient::factory()->tracked(1)->create(['name' => 'Salsiccia']);
+    $panino->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+    $piadina->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $panino->id)    // consumes the only shared unit
+        ->call('addFood', $piadina->id)   // blocked: shared ingredient gone
+        ->assertSee('Esaurito');
+
+    expect($component->get('cart'))->toHaveCount(1);
+});
+
+it('never blocks a food whose ingredients are untracked', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id]);
+    $ingredient = Ingredient::factory()->create(); // stock null: untracked
+    $food->ingredients()->attach($ingredient->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('addFood', $food->id)
+        ->assertDontSee('Esaurito');
+
+    expect(collect($component->get('cart'))->first()['quantity'])->toBe(2);
+});
+
+it('opens the sold-out modal at checkout when an ingredient ran out after adding', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id]);
+    $salsiccia = Ingredient::factory()->tracked(1)->create(['name' => 'Salsiccia']);
+    $food->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+
+    // Another register buys the last unit before this one checks out.
+    $salsiccia->update(['stock' => 0]);
+
+    $component->call('startCash')->call('setExactCash')->call('confirmCash')
+        ->assertSet('showSoldOut', true)        // sold-out modal opens
+        ->assertSet('showCashModal', false)     // payment modal closes
+        ->assertSee('Salsiccia');               // the missing ingredient is listed
+
+    expect(Order::count())->toBe(0)             // nothing placed
+        ->and($component->get('soldOutItems'))->toHaveCount(1)
+        ->and($component->get('soldOutItems')[0]['name'])->toBe('Salsiccia')
+        ->and($component->get('soldOutItems')[0]['missing'])->toBe(1);
+
+    // The cart is kept intact so the cashier can amend the order.
+    $component->call('closeSoldOut')->assertSet('showSoldOut', false);
+    expect($component->get('cart'))->toHaveCount(1);
+});
+
+it('lists every missing ingredient in the sold-out modal', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id]);
+    $pane = Ingredient::factory()->tracked(5)->create(['name' => 'Pane']);
+    $salsiccia = Ingredient::factory()->tracked(5)->create(['name' => 'Salsiccia']);
+    $food->ingredients()->attach($pane->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+    $food->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+
+    // Both ingredients run out before checkout.
+    $pane->update(['stock' => 0]);
+    $salsiccia->update(['stock' => 0]);
+
+    $component->call('startCash')->call('setExactCash')->call('confirmCash')
+        ->assertSet('showSoldOut', true)
+        ->assertSee('Pane')
+        ->assertSee('Salsiccia');
+
+    expect($component->get('soldOutItems'))->toHaveCount(2);
+});
+
+/**
+ * A register, an event day and a food using one tracked ingredient (dose 1).
+ *
+ * @return array{0: CashRegister, 1: Food, 2: Ingredient}
+ */
+function registerFoodTracked(int $stock = 3): array
+{
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id]);
+    $ingredient = Ingredient::factory()->tracked($stock)->create(['name' => 'Salsiccia']);
+    $food->ingredients()->attach($ingredient->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    return [$register, $food, $ingredient];
+}
+
+it('reserves ingredient stock when the card payment starts', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard')
+        ->assertSet('showCardModal', true);
+
+    expect($ingredient->fresh()->stock)->toBe(2)  // one unit held for the pending payment
+        ->and(StockReservation::count())->toBe(1);
+});
+
+it('releases the reservation when the card payment is cancelled', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard');
+
+    expect($ingredient->fresh()->stock)->toBe(2);
+
+    $component->call('closeCard')
+        ->assertSet('showCardModal', false)
+        ->assertSet('reservationId', null);
+
+    expect($ingredient->fresh()->stock)->toBe(3)   // stock restored
+        ->and(StockReservation::count())->toBe(0);
+});
+
+it('does not decrement stock again when confirming a reserved payment', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard')
+        ->call('confirmCard')
+        ->assertHasNoErrors();
+
+    expect(Order::count())->toBe(1)
+        ->and($ingredient->fresh()->stock)->toBe(2)    // held unit consumed once, not twice
+        ->and(StockReservation::count())->toBe(0);     // hold consumed by the order
+});
+
+it('shows sold out and never opens the card modal when the stock ran out at payment start', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(1);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+
+    // Another register takes the last unit before this one starts paying.
+    $ingredient->update(['stock' => 0]);
+
+    $component->call('startCard')
+        ->assertSet('showCardModal', false)   // customer is never charged
+        ->assertSet('showSoldOut', true)
+        ->assertSee('Salsiccia');
+
+    expect(StockReservation::count())->toBe(0)
+        ->and($ingredient->fresh()->stock)->toBe(0);
+});
+
+it('marks a food sold out for other registers while its stock is held for a payment', function () {
+    [$registerA, $food, $ingredient] = registerFoodTracked(1);
+
+    // Register A starts paying, holding the only unit.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $registerA->id)
+        ->call('addFood', $food->id)
+        ->call('startCard');
+
+    // Register B now sees the food as sold out.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', CashRegister::factory()->create()->id)
+        ->assertSee('Esaurito');
+});
+
+it('keeps the single reservation when switching from card to cash', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard');
+
+    $reservationId = $component->get('reservationId');
+
+    $component->call('cardToCash')
+        ->assertSet('showCardModal', false)
+        ->assertSet('showCashModal', true)
+        ->assertSet('reservationId', $reservationId);
+
+    expect($ingredient->fresh()->stock)->toBe(2)   // not decremented a second time
+        ->and(StockReservation::count())->toBe(1);
+});
+
+it('keeps the reservation alive while the payment screen stays open', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard');
+
+    $reservationId = $component->get('reservationId');
+
+    // The hold is about to expire; the browser heartbeat renews it.
+    StockReservation::whereKey($reservationId)->update(['expires_at' => now()->subMinute()]);
+    $component->call('keepReservationAlive')
+        ->assertSet('reservationId', $reservationId);
+
+    expect(StockReservation::releaseExpired())->toBe(0)   // no longer expired
+        ->and($ingredient->fresh()->stock)->toBe(2);       // still held
+});
+
+it('re-acquires the hold on heartbeat when it was released mid-payment', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard');
+
+    $oldId = $component->get('reservationId');
+
+    // The hold expires and the cron releases it (stock back to 3).
+    StockReservation::whereKey($oldId)->update(['expires_at' => now()->subMinute()]);
+    StockReservation::releaseExpired();
+    expect($ingredient->fresh()->stock)->toBe(3)
+        ->and(StockReservation::count())->toBe(0);
+
+    // The heartbeat re-acquires it seamlessly, payment continues.
+    $component->call('keepReservationAlive')
+        ->assertSet('showCardModal', true)
+        ->assertSet('showSoldOut', false);
+
+    expect($component->get('reservationId'))->not->toBeNull()
+        ->and($component->get('reservationId'))->not->toBe($oldId)
+        ->and($ingredient->fresh()->stock)->toBe(2)
+        ->and(StockReservation::count())->toBe(1);
+});
+
+it('stops the payment and shows sold out when the hold cannot be re-acquired', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(1);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard');
+
+    $oldId = $component->get('reservationId');
+
+    // Hold released by the cron, then another register takes the last unit.
+    StockReservation::whereKey($oldId)->update(['expires_at' => now()->subMinute()]);
+    StockReservation::releaseExpired();  // stock back to 1
+    $ingredient->update(['stock' => 0]); // taken elsewhere
+
+    $component->call('keepReservationAlive')
+        ->assertSet('showCardModal', false)
+        ->assertSet('showSoldOut', true)
+        ->assertSee('Salsiccia');
+
+    expect($component->get('reservationId'))->toBeNull()
+        ->and(StockReservation::count())->toBe(0);
+});
+
+it('does nothing on heartbeat when no payment modal is open', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('keepReservationAlive');
+
+    expect($component->get('reservationId'))->toBeNull()
+        ->and(StockReservation::count())->toBe(0)
+        ->and($ingredient->fresh()->stock)->toBe(3);
+});
+
+it('freezes the cart while a payment is in progress', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(5);
+    $second = Food::factory()->create(['category_id' => $food->category_id]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard'); // payment in progress
+
+    $key = array_key_first($component->get('cart'));
+
+    // Every cart mutation is ignored while a payment is under way.
+    $component->call('addFood', $second->id)
+        ->call('incrementLine', $key)
+        ->call('decrementLine', $key)
+        ->call('editLine', $key)
+        ->call('openClearCart');
+
+    expect($component->get('cart'))->toHaveCount(1)
+        ->and(collect($component->get('cart'))->first()['quantity'])->toBe(1)
+        ->and($component->get('editingKey'))->toBeNull()
+        ->and($component->get('showClearCart'))->toBeFalse();
+});
+
+it('cancels the payment and warns the cashier when the hold exceeds the max hold', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('startCard');
+
+    $reservationId = $component->get('reservationId');
+    expect($ingredient->fresh()->stock)->toBe(2);
+
+    // The payment screen has been open past the absolute max hold.
+    $maxHold = (int) config('inventory.max_hold', 900);
+    StockReservation::whereKey($reservationId)->update(['created_at' => now()->subSeconds($maxHold + 60)]);
+
+    $component->call('keepReservationAlive')
+        ->assertSet('showCardModal', false)
+        ->assertSet('showReservationExpired', true)
+        ->assertSet('reservationId', null);
+
+    expect($ingredient->fresh()->stock)->toBe(3)         // held stock released
+        ->and(StockReservation::count())->toBe(0)
+        ->and($component->get('cart'))->toHaveCount(1);   // cart kept
+
+    // Dismissing the notice returns to the cart, editable again.
+    $component->call('closeReservationExpired')->assertSet('showReservationExpired', false);
+    $component->call('incrementLine', array_key_first($component->get('cart')));
+    expect(collect($component->get('cart'))->first()['quantity'])->toBe(2);
+});
+
+it('gives the held stock back when the order fails after the hold was claimed', function () {
+    [$register, $food, $ingredient] = registerFoodTracked(3);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+
+    // A note longer than the domain accepts makes place() throw at commit,
+    // after the hold has already been claimed for the order.
+    $key = array_key_first($component->get('cart'));
+    $component->call('editLine', $key)
+        ->set('customizeNote', str_repeat('a', 300))
+        ->call('confirmCustomize')
+        ->call('startCard');
+
+    expect($ingredient->fresh()->stock)->toBe(2); // held for the payment
+
+    $component->call('confirmCard')->assertHasErrors('checkout');
+
+    expect(Order::count())->toBe(0)
+        ->and($ingredient->fresh()->stock)->toBe(3)      // held units given back
+        ->and(StockReservation::count())->toBe(0)
+        ->and($component->get('reservationId'))->toBeNull()
+        ->and($component->get('cart'))->toHaveCount(1);  // cart kept for a retry
 });

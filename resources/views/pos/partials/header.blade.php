@@ -4,10 +4,10 @@
         <span class="text-sm text-neutral-500">{{ $this->day->display_name }}</span>
     </div>
     <div class="flex items-center gap-1 text-neutral-600 dark:text-neutral-300">
-        {{-- Transient feedback when the drawer kick cannot be delivered. --}}
+        {{-- Transient feedback (drawer kick failures, out-of-stock blocks, ...). --}}
         <div
             x-data="{ show: false, message: '', timer: null }"
-            x-on:drawer-failed.window="message = $event.detail.message; show = true; clearTimeout(timer); timer = setTimeout(() => show = false, 4000)"
+            x-on:pos-notice.window="message = $event.detail.message; show = true; clearTimeout(timer); timer = setTimeout(() => show = false, 4000)"
             x-show="show" x-cloak x-transition
             class="mr-2 rounded-md bg-red-600 px-3 py-1 text-sm text-white"
             x-text="message"></div>

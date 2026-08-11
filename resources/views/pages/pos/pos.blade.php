@@ -14,6 +14,8 @@
 
         @include('pos.modals.customize')
         @include('pos.modals.clear-cart')
+        @include('pos.modals.sold-out')
+        @include('pos.modals.reservation-expired')
         @include('pos.modals.cash')
         @include('pos.modals.card')
         @include('pos.modals.discount')

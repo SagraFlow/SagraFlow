@@ -15,6 +15,7 @@ class Ingredient extends Model
 
     /** @use HasFactory<IngredientFactory> */
     use HasFactory;
+
     use NormalizesName;
 
     protected $fillable = ['name', 'surcharge', 'stock', 'active'];
@@ -32,5 +33,24 @@ class Ingredient extends Model
     {
         return $this->belongsToMany(Food::class)
             ->withPivot('quantity', 'min_quantity', 'max_quantity');
+    }
+
+    /**
+     * Atomically consumes the given number of stock units. Untracked
+     * ingredients (null stock) are unlimited and always succeed. For tracked
+     * ingredients the decrement is conditional on there being enough stock, so
+     * concurrent sales can never drive the stock negative: returns false (and
+     * changes nothing) when the units are not available.
+     */
+    public function consume(int $units): bool
+    {
+        if ($this->stock === null || $units <= 0) {
+            return true;
+        }
+
+        return static::whereKey($this->getKey())
+            ->whereNotNull('stock')
+            ->where('stock', '>=', $units)
+            ->decrement('stock', $units) > 0;
     }
 }

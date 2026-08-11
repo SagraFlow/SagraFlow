@@ -106,7 +106,7 @@ it('kicks the cash drawer on the register printer', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('openCashDrawer')
-        ->assertNotDispatched('drawer-failed');
+        ->assertNotDispatched('pos-notice');
 });
 
 it('signals a failure when the drawer cannot be kicked', function () {
@@ -122,7 +122,7 @@ it('signals a failure when the drawer cannot be kicked', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('openCashDrawer')
-        ->assertDispatched('drawer-failed');
+        ->assertDispatched('pos-notice');
 });
 
 it('signals a failure when the register has no printer', function () {
@@ -133,7 +133,7 @@ it('signals a failure when the register has no printer', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('openCashDrawer')
-        ->assertDispatched('drawer-failed');
+        ->assertDispatched('pos-notice');
 });
 
 it('configures offline-status monitoring only when not already enabled', function () {

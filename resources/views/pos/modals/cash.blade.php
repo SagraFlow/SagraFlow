@@ -1,5 +1,5 @@
 @if ($showCashModal)
-    <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+    <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" wire:poll.60s="keepReservationAlive">
         <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-neutral-900">
             <h2 class="text-xl font-semibold">Pagamento in contanti</h2>
 

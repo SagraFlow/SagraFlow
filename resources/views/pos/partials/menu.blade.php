@@ -16,14 +16,26 @@
             <section id="cat-{{ $group['category']->id }}" class="scroll-mt-4">
                 <h2 class="mb-2 text-base font-semibold uppercase tracking-wide text-neutral-400">{{ $group['category']->name }}</h2>
                 <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
-                    @foreach ($group['foods'] as $food)
+                    @foreach ($group['foods'] as $item)
+                        @php($food = $item['food'])
                         <button
                             type="button"
-                            wire:click="addFood({{ $food->id }})"
-                            class="flex h-20 flex-col justify-between rounded-lg border border-neutral-200 bg-white p-2 text-left shadow-sm transition dark:border-neutral-800 dark:bg-neutral-900"
+                            @if ($item['available'])
+                                wire:click="addFood({{ $food->id }})"
+                            @else
+                                disabled
+                            @endif
+                            @class([
+                                'flex h-20 flex-col justify-between rounded-lg border border-neutral-200 bg-white p-2 text-left shadow-sm transition dark:border-neutral-800 dark:bg-neutral-900',
+                                'opacity-50 cursor-not-allowed' => ! $item['available'],
+                            ])
                         >
                             <span class="text-base font-medium leading-tight">{{ $food->name }}</span>
-                            <span class="text-sm text-neutral-500">{{ $this->money($food->price) }}</span>
+                            @if ($item['available'])
+                                <span class="text-sm text-neutral-500">{{ $this->money($food->price) }}</span>
+                            @else
+                                <span class="text-sm font-semibold uppercase text-red-600 dark:text-red-400">Esaurito</span>
+                            @endif
                         </button>
                     @endforeach
                 </div>

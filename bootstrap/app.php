@@ -16,6 +16,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Printer health heartbeat + queue reconciliation.
         $schedule->command('printers:poll')->everyFifteenSeconds()->withoutOverlapping();
         $schedule->command('print:reconcile')->everyMinute()->withoutOverlapping();
+        // Free stock held by checkouts that never confirmed nor cancelled.
+        $schedule->command('stock:release-reservations')->everyMinute()->withoutOverlapping();
         // Populate the Horizon metrics dashboard.
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
     })

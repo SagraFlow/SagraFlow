@@ -107,6 +107,7 @@ class Order extends Model
         int $coverCharge = 0,
         bool $discountAppliesToCover = false,
         ?int $cashReceived = null,
+        bool $consumeStock = true,
     ): self {
         if ($items === []) {
             throw new OrderException('Un ordine deve contenere almeno una pietanza.');
@@ -132,7 +133,7 @@ class Order extends Model
         for ($attempt = 0; $attempt < 5; $attempt++) {
             try {
                 return DB::transaction(fn (): self => static::build(
-                    $day, $register, $operator, $tableNumber, $customerName, $covers, $coverCharge, $paymentMethod, $items, $discountType, $discountValue, $discountAppliesToCover, $cashReceived,
+                    $day, $register, $operator, $tableNumber, $customerName, $covers, $coverCharge, $paymentMethod, $items, $discountType, $discountValue, $discountAppliesToCover, $cashReceived, $consumeStock,
                 ));
             } catch (UniqueConstraintViolationException) {
                 continue;
@@ -167,6 +168,7 @@ class Order extends Model
         ?int $discountValue,
         bool $discountAppliesToCover,
         ?int $cashReceived,
+        bool $consumeStock = true,
     ): self {
         $order = static::create([
             'event_day_id' => $day->id,
@@ -191,9 +193,29 @@ class Order extends Model
         ]);
 
         $subtotal = 0;
+        $needByIngredient = [];
 
         foreach ($items as $item) {
-            $subtotal += $order->addLine($item)->line_total;
+            $line = $order->addLine($item);
+            $subtotal += $line->line_total;
+
+            // Accumulate the ingredient stock consumed by this line:
+            // per-portion dose x number of portions, skipping unlinked lines.
+            foreach ($line->ingredients as $lineIngredient) {
+                if ($lineIngredient->ingredient_id === null) {
+                    continue;
+                }
+
+                $units = $lineIngredient->quantity * $line->quantity;
+
+                if ($units > 0) {
+                    $needByIngredient[$lineIngredient->ingredient_id] = ($needByIngredient[$lineIngredient->ingredient_id] ?? 0) + $units;
+                }
+            }
+        }
+
+        if ($consumeStock) {
+            $order->consumeIngredientStock($needByIngredient);
         }
 
         $coverTotal = $order->coverTotal();
@@ -263,5 +285,35 @@ class Order extends Model
         $line->forceFill(['line_total' => $line->computeTotal()])->save();
 
         return $line;
+    }
+
+    /**
+     * Atomically decrements the stock of the tracked ingredients this order
+     * consumes. Decrements run in ascending id order so concurrent registers
+     * lock rows in the same order and never deadlock. Throws (rolling back the
+     * whole order) as soon as a tracked ingredient is short; untracked
+     * ingredients and vanished ones are skipped.
+     *
+     * @param  array<int, int>  $needByIngredient  ingredient id => units required
+     *
+     * @throws OrderException
+     */
+    protected function consumeIngredientStock(array $needByIngredient): void
+    {
+        if ($needByIngredient === []) {
+            return;
+        }
+
+        ksort($needByIngredient);
+
+        $ingredients = Ingredient::whereIn('id', array_keys($needByIngredient))->get()->keyBy('id');
+
+        foreach ($needByIngredient as $ingredientId => $units) {
+            $ingredient = $ingredients->get($ingredientId);
+
+            if ($ingredient !== null && ! $ingredient->consume($units)) {
+                throw new OrderException("Ingrediente «{$ingredient->name}» esaurito.");
+            }
+        }
     }
 }

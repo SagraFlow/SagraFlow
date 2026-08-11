@@ -1,5 +1,5 @@
 @if ($showCardModal)
-    <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+    <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" wire:poll.60s="keepReservationAlive">
         <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-neutral-900">
             <h2 class="text-xl font-semibold">Pagamento con carta</h2>
             <p class="mt-1 text-neutral-500">Importo <span class="font-semibold text-neutral-900 dark:text-neutral-100">{{ $this->money($this->orderTotal) }}</span> da incassare sul POS.</p>

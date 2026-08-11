@@ -301,3 +301,111 @@ it('rejects an empty order', function () {
 
     Order::place($day, null, null, null, null, PaymentMethod::Cash, []);
 })->throws(OrderException::class);
+
+it('decrements a tracked ingredient by dose times portions', function () {
+    $day = EventDay::factory()->create();
+    [$food, $salamina] = foodWithSalamina();
+    $salamina->update(['stock' => 10]);
+
+    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($food, 3, [frozenIngredient($salamina, 1, 1)]),
+    ]);
+
+    expect($salamina->fresh()->stock)->toBe(7); // 1 dose x 3 portions
+});
+
+it('does not consume stock for a removed ingredient', function () {
+    $day = EventDay::factory()->create();
+    [$food, $salamina] = foodWithSalamina(base: 1, min: 0, max: 2);
+    $salamina->update(['stock' => 5]);
+
+    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($food, 2, [frozenIngredient($salamina, 0, 1)]), // "senza"
+    ]);
+
+    expect($salamina->fresh()->stock)->toBe(5);
+});
+
+it('consumes extra stock for a doubled ingredient dose', function () {
+    $day = EventDay::factory()->create();
+    [$food, $salamina] = foodWithSalamina(base: 1, max: 2);
+    $salamina->update(['stock' => 10]);
+
+    Order::place($day, null, null, null, null, PaymentMethod::Card, [
+        frozenLine($food, 2, [frozenIngredient($salamina, 2, 1)]), // 2 dose x 2 portions
+    ]);
+
+    expect($salamina->fresh()->stock)->toBe(6);
+});
+
+it('never touches the stock of an untracked ingredient', function () {
+    $day = EventDay::factory()->create();
+    [$food, $salamina] = foodWithSalamina(); // stock null by default
+
+    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($food, 100, [frozenIngredient($salamina, 2, 1)]),
+    ]);
+
+    expect($salamina->fresh()->stock)->toBeNull();
+});
+
+it('blocks an order that would oversell a tracked ingredient and rolls back', function () {
+    $day = EventDay::factory()->create();
+    [$food, $salamina] = foodWithSalamina();
+    $salamina->update(['stock' => 2]);
+
+    expect(fn () => Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($food, 3, [frozenIngredient($salamina, 1, 1)]), // needs 3, only 2 left
+    ]))->toThrow(OrderException::class, 'esaurito');
+
+    expect(Order::count())->toBe(0)                 // whole order rolled back
+        ->and($salamina->fresh()->stock)->toBe(2);  // stock untouched
+});
+
+it('aggregates consumption of an ingredient shared across lines', function () {
+    $day = EventDay::factory()->create();
+    [$panino, $salsiccia] = foodWithSalamina();
+    $salsiccia->update(['stock' => 5]);
+
+    $piadina = Food::factory()->create();
+    $piadina->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 2]);
+
+    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($panino, 2, [frozenIngredient($salsiccia, 1, 1)]),   // 2
+        frozenLine($piadina->fresh(), 1, [frozenIngredient($salsiccia, 1, 1)]), // 1
+    ]);
+
+    expect($salsiccia->fresh()->stock)->toBe(2); // 5 - 3
+});
+
+it('runs the stock down to exactly zero then blocks the next order', function () {
+    $day = EventDay::factory()->create();
+    [$food, $salamina] = foodWithSalamina();
+    $salamina->update(['stock' => 1]);
+
+    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($food, 1, [frozenIngredient($salamina, 1, 1)]),
+    ]);
+    expect($salamina->fresh()->stock)->toBe(0);
+
+    expect(fn () => Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($food, 1, [frozenIngredient($salamina, 1, 1)]),
+    ]))->toThrow(OrderException::class);
+
+    expect($salamina->fresh()->stock)->toBe(0) // never negative
+        ->and(Order::count())->toBe(1);        // only the first order placed
+});
+
+it('skips the stock decrement when consumeStock is false', function () {
+    $day = EventDay::factory()->create();
+    [$food, $salamina] = foodWithSalamina();
+    $salamina->update(['stock' => 5]);
+
+    // The POS passes consumeStock: false because the stock was already held by
+    // a reservation taken when the payment started.
+    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+        frozenLine($food, 3, [frozenIngredient($salamina, 1, 1)]),
+    ], consumeStock: false);
+
+    expect($salamina->fresh()->stock)->toBe(5); // untouched
+});

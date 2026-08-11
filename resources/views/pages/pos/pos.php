@@ -13,6 +13,7 @@ use App\Models\Ingredient;
 use App\Models\Order;
 use App\Models\Printer;
 use App\Models\PrintJob;
+use App\Models\StockReservation;
 use App\Printing\Documents\DrawerKick;
 use App\Printing\OrderPrinter;
 use App\Printing\PrinterConnection;
@@ -76,6 +77,21 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public bool $showCardModal = false;
 
     public bool $showClearCart = false;
+
+    public bool $showSoldOut = false;
+
+    public bool $showReservationExpired = false;
+
+    /**
+     * Ingredients that ran short at checkout, shown in the sold-out modal.
+     *
+     * @var array<int, array{name: string, missing: int}>
+     */
+    public array $soldOutItems = [];
+
+    /** Id of the stock reservation held while a payment is in progress. */
+    #[Locked]
+    public ?int $reservationId = null;
 
     /** Cash tendered, in cents (authoritative). */
     public int $cashReceivedCents = 0;
@@ -192,9 +208,12 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     #[Computed]
     public function menu(): Collection
     {
+        $consumption = $this->cartConsumption();
+
         $foodsByCategory = Food::query()
             ->active()
             ->availableOn($this->day)
+            ->with('ingredients')
             ->orderBy('name')
             ->get()
             ->groupBy('category_id');
@@ -202,7 +221,11 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         return $this->categories
             ->map(fn (Category $category): array => [
                 'category' => $category,
-                'foods' => $foodsByCategory->get($category->id, collect()),
+                'foods' => $foodsByCategory->get($category->id, collect())
+                    ->map(fn (Food $food): array => [
+                        'food' => $food,
+                        'available' => $this->foodIsAvailable($food, $consumption),
+                    ]),
             ])
             ->filter(fn (array $group): bool => $group['foods']->isNotEmpty())
             ->values();
@@ -339,7 +362,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $printer = $this->cashRegister?->printer;
 
         if ($printer === null) {
-            $this->dispatch('drawer-failed', message: 'Nessuna stampante associata alla cassa.');
+            $this->dispatch('pos-notice', message: 'Nessuna stampante associata alla cassa.');
 
             return;
         }
@@ -347,7 +370,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         try {
             app(PrinterConnection::class)->send($printer->ip_address, $printer->port, (new DrawerKick)->render(), timeout: 3);
         } catch (PrinterException) {
-            $this->dispatch('drawer-failed', message: 'Impossibile aprire il cassetto: stampante non raggiungibile.');
+            $this->dispatch('pos-notice', message: 'Impossibile aprire il cassetto: stampante non raggiungibile.');
         }
     }
 
@@ -377,11 +400,30 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
     }
 
+    /**
+     * Whether a payment is under way (a payment modal open or stock held), during
+     * which the cart is frozen so it never diverges from the taken reservation.
+     */
+    protected function paymentInProgress(): bool
+    {
+        return $this->showCashModal || $this->showCardModal || $this->reservationId !== null;
+    }
+
     public function addFood(int $foodId): void
     {
+        if ($this->paymentInProgress()) {
+            return;
+        }
+
         $food = Food::active()->with('ingredients')->find($foodId);
 
         if ($food === null) {
+            return;
+        }
+
+        if (! $this->foodIsAvailable($food, $this->cartConsumption())) {
+            $this->dispatch('pos-notice', message: "«{$food->name}» esaurito.");
+
             return;
         }
 
@@ -410,6 +452,10 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
      */
     public function editLine(string $key): void
     {
+        if ($this->paymentInProgress()) {
+            return;
+        }
+
         $line = $this->cart[$key] ?? null;
 
         if ($line === null) {
@@ -444,37 +490,55 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public function confirmCustomize(): void
     {
-        $food = $this->customizingFood;
-
-        if ($food !== null && $this->editingKey !== null && isset($this->cart[$this->editingKey])) {
-            $ingredients = $this->lineIngredients($food, $this->customizeQty);
-            $note = $this->customizeNote ?: null;
-            $newKey = $this->cartKey($food, $ingredients, $note);
-            $quantity = $this->cart[$this->editingKey]['quantity'];
-
-            if ($newKey !== $this->editingKey && isset($this->cart[$newKey])) {
-                // The new configuration matches another line: merge into it.
-                $this->cart[$newKey]['quantity'] += $quantity;
-                unset($this->cart[$this->editingKey]);
-            } else {
-                // Update the line in place, keeping its position in the cart.
-                $line = [
-                    'food_id' => $food->id,
-                    'name' => $food->name,
-                    'unit_price' => $food->price,
-                    'quantity' => $quantity,
-                    'note' => $note,
-                    'ingredients' => $ingredients,
-                ];
-
-                $this->cart = collect($this->cart)
-                    ->mapWithKeys(fn (array $existing, string $key): array => $key === $this->editingKey
-                        ? [$newKey => $line]
-                        : [$key => $existing])
-                    ->all();
-            }
+        if ($this->paymentInProgress()) {
+            return;
         }
 
+        $food = $this->customizingFood;
+
+        if ($food === null || $this->editingKey === null || ! isset($this->cart[$this->editingKey])) {
+            $this->cancelCustomize();
+
+            return;
+        }
+
+        $ingredients = $this->lineIngredients($food, $this->customizeQty);
+        $note = $this->customizeNote ?: null;
+        $newKey = $this->cartKey($food, $ingredients, $note);
+        $quantity = $this->cart[$this->editingKey]['quantity'];
+
+        // Build the prospective cart, then commit only if it still fits the stock.
+        if ($newKey !== $this->editingKey && isset($this->cart[$newKey])) {
+            // The new configuration matches another line: merge into it.
+            $cart = $this->cart;
+            $cart[$newKey]['quantity'] += $quantity;
+            unset($cart[$this->editingKey]);
+        } else {
+            // Update the line in place, keeping its position in the cart.
+            $line = [
+                'food_id' => $food->id,
+                'name' => $food->name,
+                'unit_price' => $food->price,
+                'quantity' => $quantity,
+                'note' => $note,
+                'ingredients' => $ingredients,
+            ];
+
+            $cart = collect($this->cart)
+                ->mapWithKeys(fn (array $existing, string $key): array => $key === $this->editingKey
+                    ? [$newKey => $line]
+                    : [$key => $existing])
+                ->all();
+        }
+
+        if (($over = $this->overStockIngredient($cart)) !== null) {
+            // Keep the modal open so the operator can lower the dose.
+            $this->dispatch('pos-notice', message: "«{$over}» esaurito.");
+
+            return;
+        }
+
+        $this->cart = $cart;
         $this->cancelCustomize();
     }
 
@@ -486,14 +550,25 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public function incrementLine(string $key): void
     {
-        if (isset($this->cart[$key])) {
-            $this->cart[$key]['quantity']++;
+        if ($this->paymentInProgress() || ! isset($this->cart[$key])) {
+            return;
         }
+
+        $cart = $this->cart;
+        $cart[$key]['quantity']++;
+
+        if (($over = $this->overStockIngredient($cart)) !== null) {
+            $this->dispatch('pos-notice', message: "«{$over}» esaurito.");
+
+            return;
+        }
+
+        $this->cart = $cart;
     }
 
     public function decrementLine(string $key): void
     {
-        if (! isset($this->cart[$key])) {
+        if ($this->paymentInProgress() || ! isset($this->cart[$key])) {
             return;
         }
 
@@ -504,6 +579,10 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public function openClearCart(): void
     {
+        if ($this->paymentInProgress()) {
+            return;
+        }
+
         if ($this->cart !== []) {
             $this->showClearCart = true;
         }
@@ -519,6 +598,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
      */
     public function clearCart(): void
     {
+        $this->releaseReservation();
         $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart');
     }
 
@@ -571,6 +651,10 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
+        if (! $this->ensureReserved()) {
+            return;
+        }
+
         $this->resetCash();
         $this->showCashModal = true;
     }
@@ -613,6 +697,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function closeCash(): void
     {
         $this->showCashModal = false;
+        $this->releaseReservation();
     }
 
     public function confirmCash(): void
@@ -636,16 +721,22 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
+        if (! $this->ensureReserved()) {
+            return;
+        }
+
         $this->showCardModal = true;
     }
 
     public function closeCard(): void
     {
         $this->showCardModal = false;
+        $this->releaseReservation();
     }
 
     public function cardToCash(): void
     {
+        // Keep the reservation: the sale is still going, only the tender changes.
         $this->showCardModal = false;
         $this->startCash();
     }
@@ -666,6 +757,15 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
             return;
         }
+
+        // Stock was held when the payment started: claim that hold up front, so
+        // the reaper cannot give its units back between here and the commit, and
+        // let the order skip its own decrement. When the hold is already gone
+        // (expired mid-payment and reaped) place() decrements at commit instead
+        // and may still fail on a shortage.
+        $reservation = $this->reservationId !== null ? StockReservation::find($this->reservationId) : null;
+        $holdClaimed = $reservation !== null && $reservation->claim();
+        $consumeStock = ! $holdClaimed;
 
         // The order is built from the frozen cart snapshot; the ids only re-link
         // the (nullable) foreign keys and become null if the record is gone.
@@ -713,9 +813,28 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
                 $this->coverCharge,
                 $this->discountAppliesToCover,
                 $method === 'cash' ? $this->cashReceivedCents : null,
+                consumeStock: $consumeStock,
             );
         } catch (OrderException $e) {
-            $this->addError('checkout', $e->getMessage());
+            if ($holdClaimed) {
+                // The order the hold was claimed for never existed: give the
+                // units back. Under a hold the failure is never a shortage, and
+                // the payment screen's heartbeat takes a fresh hold.
+                StockReservation::restoreHeld($reservation->held ?? []);
+                $this->reservationId = null;
+                $this->addError('checkout', $e->getMessage());
+
+                return;
+            }
+
+            // Without a hold the stock is decremented at commit, so it can have
+            // run out: then surface the missing ingredients.
+            if (($shortfall = $this->stockShortfall($this->cart)) !== []) {
+                $this->reservationId = null;
+                $this->openSoldOut($shortfall);
+            } else {
+                $this->addError('checkout', $e->getMessage());
+            }
 
             return;
         }
@@ -728,7 +847,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
 
         $this->placedOrderNumber = $order->number;
-        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'cashReceivedCents', 'cashInput');
+        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'cashReceivedCents', 'cashInput', 'reservationId', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
     }
 
     public function newOrder(): void
@@ -798,6 +917,206 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             'base_quantity' => $ingredient->pivot->quantity,
             'surcharge' => $ingredient->surcharge,
         ])->all();
+    }
+
+    /**
+     * Units of each ingredient consumed by a cart (defaults to the current
+     * cart): per-portion dose x number of portions, summed across all lines.
+     *
+     * @param  array<string, array<string, mixed>>|null  $cart
+     * @return array<int, int> ingredient id => units
+     */
+    protected function cartConsumption(?array $cart = null): array
+    {
+        $consumption = [];
+
+        foreach ($cart ?? $this->cart as $line) {
+            foreach ($line['ingredients'] as $ingredient) {
+                $units = $ingredient['quantity'] * $line['quantity'];
+
+                if ($units > 0) {
+                    $consumption[$ingredient['ingredient_id']] = ($consumption[$ingredient['ingredient_id']] ?? 0) + $units;
+                }
+            }
+        }
+
+        return $consumption;
+    }
+
+    /**
+     * The name of the first tracked ingredient the given cart would oversell,
+     * or null when everything fits. Untracked ingredients (null stock) never
+     * block.
+     *
+     * @param  array<string, array<string, mixed>>  $cart
+     */
+    protected function overStockIngredient(array $cart): ?string
+    {
+        return $this->stockShortfall($cart)[0]['name'] ?? null;
+    }
+
+    /**
+     * Tracked ingredients the given cart would oversell, each with how many
+     * units are missing. Empty when everything fits (untracked ingredients
+     * never appear).
+     *
+     * @param  array<string, array<string, mixed>>  $cart
+     * @return array<int, array{name: string, missing: int}>
+     */
+    protected function stockShortfall(array $cart): array
+    {
+        $consumption = $this->cartConsumption($cart);
+
+        if ($consumption === []) {
+            return [];
+        }
+
+        $shortfall = [];
+
+        foreach (Ingredient::whereIn('id', array_keys($consumption))->get() as $ingredient) {
+            if ($ingredient->stock !== null && $consumption[$ingredient->id] > $ingredient->stock) {
+                $shortfall[] = ['name' => $ingredient->name, 'missing' => $consumption[$ingredient->id] - $ingredient->stock];
+            }
+        }
+
+        return $shortfall;
+    }
+
+    /**
+     * Close the payment modals and surface the sold-out modal listing the
+     * ingredients that ran short, so the operator can amend the order.
+     *
+     * @param  array<int, array{name: string, missing: int}>  $shortfall
+     */
+    protected function openSoldOut(array $shortfall): void
+    {
+        $this->showCashModal = false;
+        $this->showCardModal = false;
+        $this->soldOutItems = $shortfall;
+        $this->showSoldOut = true;
+    }
+
+    public function closeSoldOut(): void
+    {
+        $this->showSoldOut = false;
+        $this->soldOutItems = [];
+    }
+
+    /**
+     * Abandon a payment left open past the maximum hold: release the stock, exit
+     * the payment modals back to the (intact) cart, and warn the cashier.
+     */
+    protected function expirePayment(): void
+    {
+        $this->releaseReservation();
+        $this->showCashModal = false;
+        $this->showCardModal = false;
+        $this->showReservationExpired = true;
+    }
+
+    public function closeReservationExpired(): void
+    {
+        $this->showReservationExpired = false;
+    }
+
+    /**
+     * Ensure the cart's ingredient stock is held before taking payment. Returns
+     * false (and opens the sold-out modal) when the stock is short, so the
+     * customer is never charged for goods that cannot be served.
+     */
+    protected function ensureReserved(): bool
+    {
+        if ($this->reservationId !== null && StockReservation::whereKey($this->reservationId)->exists()) {
+            return true; // already holding this cart's stock
+        }
+
+        $reservation = StockReservation::reserve($this->cartConsumption(), (int) config('inventory.reservation_ttl', 300));
+
+        if ($reservation === null) {
+            $this->openSoldOut($this->stockShortfall($this->cart));
+
+            return false;
+        }
+
+        $this->reservationId = $reservation->id;
+
+        return true;
+    }
+
+    /**
+     * Give back any stock held for this checkout (payment cancelled/abandoned).
+     */
+    protected function releaseReservation(): void
+    {
+        if ($this->reservationId !== null) {
+            StockReservation::find($this->reservationId)?->release();
+            $this->reservationId = null;
+        }
+    }
+
+    /**
+     * Heartbeat polled by the browser while a payment modal is open: keeps the
+     * reservation alive so a slow payment never loses its hold, while the TTL
+     * still frees holds from browsers that are actually gone. If the hold was
+     * already released (e.g. the tab was suspended past the TTL), re-acquire it;
+     * when the stock is gone, stop the payment and show the sold-out modal
+     * before the customer is charged.
+     */
+    public function keepReservationAlive(): void
+    {
+        if (! $this->showCashModal && ! $this->showCardModal) {
+            return;
+        }
+
+        $ttl = (int) config('inventory.reservation_ttl', 300);
+
+        if ($this->reservationId !== null && ($reservation = StockReservation::find($this->reservationId)) !== null) {
+            // Absolute cap: a payment screen left open too long (from when the
+            // payment started) is treated as abandoned, freeing the held stock.
+            $maxHold = (int) config('inventory.max_hold', 900);
+
+            if ($reservation->created_at !== null && $reservation->created_at->addSeconds($maxHold)->isPast()) {
+                $this->expirePayment();
+
+                return;
+            }
+
+            $reservation->renew($ttl);
+
+            return;
+        }
+
+        $reservation = StockReservation::reserve($this->cartConsumption(), $ttl);
+
+        if ($reservation === null) {
+            $this->reservationId = null;
+            $this->openSoldOut($this->stockShortfall($this->cart));
+
+            return;
+        }
+
+        $this->reservationId = $reservation->id;
+    }
+
+    /**
+     * Whether one more base portion of the food fits the tracked ingredient
+     * stock left after the current cart. Untracked ingredients are unlimited.
+     *
+     * @param  array<int, int>  $consumption  ingredient id => units already in cart
+     */
+    protected function foodIsAvailable(Food $food, array $consumption): bool
+    {
+        foreach ($food->ingredients as $ingredient) {
+            if ($ingredient->stock === null) {
+                continue;
+            }
+
+            if ($ingredient->stock - ($consumption[$ingredient->id] ?? 0) < $ingredient->pivot->quantity) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
