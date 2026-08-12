@@ -82,6 +82,8 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public bool $showReservationExpired = false;
 
+    public bool $showPrinterIssues = false;
+
     /**
      * Ingredients that ran short at checkout, shown in the sold-out modal.
      *
@@ -127,29 +129,16 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
      * the comande won't come out - but not the other registers' printers. Polled
      * by the POS header so problems surface within seconds.
      *
+     * The message is kept short: it rides in a badge in the header (never in a
+     * band above the menu, which would resize the grid under the cashier's
+     * fingers), so it names the most relevant printer and counts the rest.
+     *
      * @return array{level: string, message: string}|null
      */
     #[Computed]
     public function printerAlert(): ?array
     {
-        $registerPrinterId = $this->cashRegister?->printer_id;
-
-        $printers = Printer::query()
-            ->active()
-            ->where(function ($query) use ($registerPrinterId): void {
-                $query->whereDoesntHave('cashRegister'); // department printers
-
-                if ($registerPrinterId !== null) {
-                    $query->orWhere('id', $registerPrinterId); // this register's own
-                }
-            })
-            ->get()
-            // This register's own printer first, then the rest alphabetically.
-            ->sortBy(fn (Printer $printer): array => [
-                $printer->id === $registerPrinterId ? 0 : 1,
-                $printer->name,
-            ])
-            ->values();
+        $printers = $this->relevantPrinters();
 
         if ($printers->isEmpty()) {
             return null;
@@ -158,13 +147,14 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $inError = $printers->filter(fn (Printer $printer): bool => ! $printer->status->canPrint());
 
         if ($inError->isNotEmpty()) {
-            $names = $inError
-                ->map(fn (Printer $printer): string => "{$printer->name} ({$printer->status->getLabel()})")
-                ->implode(', ');
+            // The first one is this register's own printer when it is among them,
+            // otherwise the alphabetically first department printer.
+            $worst = $inError->first();
+            $others = $inError->count() - 1;
 
             return [
                 'level' => 'danger',
-                'message' => ($inError->count() > 1 ? 'Stampanti non pronte: ' : 'Stampante non pronta: ').$names,
+                'message' => "{$worst->name}: ".mb_strtolower($worst->status->getLabel()).($others > 0 ? " +{$others}" : ''),
             ];
         }
 
@@ -176,10 +166,83 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             ->count();
 
         if ($waiting > 0) {
-            return ['level' => 'warning', 'message' => "{$waiting} stampe in attesa"];
+            return ['level' => 'warning', 'message' => "{$waiting} in attesa"];
         }
 
         return null;
+    }
+
+    /**
+     * The printers this cashier's work depends on: their own register's printer
+     * plus every shared department printer, their own first and the rest
+     * alphabetically. Other registers' printers are none of their business.
+     *
+     * @return Collection<int, Printer>
+     */
+    protected function relevantPrinters(): Collection
+    {
+        $registerPrinterId = $this->cashRegister?->printer_id;
+
+        return Printer::query()
+            ->active()
+            ->where(function ($query) use ($registerPrinterId): void {
+                $query->whereDoesntHave('cashRegister'); // department printers
+
+                if ($registerPrinterId !== null) {
+                    $query->orWhere('id', $registerPrinterId); // this register's own
+                }
+            })
+            ->get()
+            ->sortBy(fn (Printer $printer): array => [
+                $printer->id === $registerPrinterId ? 0 : 1,
+                $printer->name,
+            ])
+            ->values();
+    }
+
+    /**
+     * Every relevant printer that is either unable to print or sitting on jobs
+     * waiting to retry, in the same order as the badge. The full picture the
+     * badge has no room for, shown when the cashier taps it.
+     *
+     * @return array<int, array{name: string, status: string, blocked: bool, waiting: int}>
+     */
+    #[Computed]
+    public function printerIssues(): array
+    {
+        $printers = $this->relevantPrinters();
+
+        if ($printers->isEmpty()) {
+            return [];
+        }
+
+        $waitingByPrinter = PrintJob::query()
+            ->whereIn('printer_id', $printers->pluck('id'))
+            ->where('status', PrintJobStatus::Held)
+            ->selectRaw('printer_id, count(*) as total')
+            ->groupBy('printer_id')
+            ->pluck('total', 'printer_id');
+
+        return $printers
+            ->map(fn (Printer $printer): array => [
+                'name' => $printer->name,
+                'status' => $printer->status->getLabel(),
+                'blocked' => ! $printer->status->canPrint(),
+                'waiting' => (int) ($waitingByPrinter[$printer->id] ?? 0),
+            ])
+            ->filter(fn (array $issue): bool => $issue['blocked'] || $issue['waiting'] > 0)
+            ->values()
+            ->all();
+    }
+
+    public function openPrinterIssues(): void
+    {
+        $this->showPrinterIssues = true;
+    }
+
+    public function closePrinterIssues(): void
+    {
+        $this->showPrinterIssues = false;
     }
 
     /**

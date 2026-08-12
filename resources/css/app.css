@@ -14,3 +14,34 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/*
+ * Printer trouble badge on the till. One single slow breathing, from the moment
+ * it appears until the problem is fixed: the cashier is often looking away
+ * (giving change, talking to the customer), so a signal that stops after a few
+ * seconds is simply missed, and a calm constant rhythm is far easier to live
+ * with for hours than something that keeps changing pace.
+ *
+ * Only the scale is animated: it costs nothing to repaint, so the menu grid
+ * stays fluid on cheap tablets for the whole evening.
+ */
+@keyframes pos-alert-breathe {
+    0%,
+    100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(0.94);
+    }
+}
+
+.pos-alert-pulse {
+    /* 2s per cycle: motion the eye catches, nowhere near flicker territory. */
+    animation: pos-alert-breathe 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pos-alert-pulse {
+        animation: none;
+    }
+}

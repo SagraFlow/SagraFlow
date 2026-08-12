@@ -5,7 +5,6 @@
         @include('pos.partials.register-picker')
     @else
         @include('pos.partials.header')
-        @include('pos.partials.printer-alert')
 
         <div class="flex flex-1 overflow-hidden">
             @include('pos.partials.menu')
@@ -14,6 +13,7 @@
 
         @include('pos.modals.customize')
         @include('pos.modals.clear-cart')
+        @include('pos.modals.printer-issues')
         @include('pos.modals.sold-out')
         @include('pos.modals.reservation-expired')
         @include('pos.modals.cash')

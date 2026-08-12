@@ -48,7 +48,7 @@ it('warns the cashier when the register printer is offline', function () {
 
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->assertSee('Offline');
+        ->assertSee('Cassa 1: offline');
 });
 
 it('warns the cashier about a department printer in error', function () {
@@ -61,10 +61,10 @@ it('warns the cashier about a department printer in error', function () {
 
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->assertSee('Cucina');
+        ->assertSee('Cucina: carta esaurita');
 });
 
-it('lists the register printer first, then the others alphabetically', function () {
+it('names the register printer first and counts the other broken ones', function () {
     $day = EventDay::factory()->create();
     $day->open(User::factory()->create());
     // Register printer named to sort last alphabetically, to prove it still comes first.
@@ -73,9 +73,49 @@ it('lists the register printer first, then the others alphabetically', function 
     Printer::factory()->create(['name' => 'Bar', 'status' => PrinterStatus::Offline]);
     Printer::factory()->create(['name' => 'Cucina', 'status' => PrinterStatus::PaperOut]);
 
+    // The badge has room for one name: the cashier's own printer wins, the rest
+    // are a count.
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->assertSeeInOrder(['Zeta Cassa', 'Bar', 'Cucina']);
+        ->assertSee('Zeta Cassa: offline +2');
+});
+
+it('shows no printer badge when everything is ready', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['status' => PrinterStatus::Ready]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertDontSee('pos-alert-pulse')
+        ->assertDontSee('bg-amber-500');
+});
+
+it('breathes the badge while a printer cannot print', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['status' => PrinterStatus::Offline]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('pos-alert-pulse');
+});
+
+it('does not breathe for jobs merely waiting to be retried', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['status' => PrinterStatus::Ready]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+    jobForPrinter($printer, PrintJobStatus::Held);
+    jobForPrinter($printer, PrintJobStatus::Held);
+
+    // Held jobs retry on their own: worth showing, not worth a moving signal.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('2 in attesa')
+        ->assertDontSee('pos-alert-pulse');
 });
 
 it('does not warn the cashier about another register printer', function () {
@@ -215,4 +255,65 @@ it('reprints a single job from the print jobs table', function () {
 
     Queue::assertPushed(SendToPrinterJob::class, 1);
     expect($job->fresh()->status)->toBe(PrintJobStatus::Pending);
+});
+
+it('lists every problematic printer when the badge is tapped', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $registerPrinter = Printer::factory()->create(['name' => 'Zeta Cassa', 'status' => PrinterStatus::Offline]);
+    $register = CashRegister::factory()->create(['printer_id' => $registerPrinter->id]);
+    $kitchen = Printer::factory()->create(['name' => 'Cucina', 'status' => PrinterStatus::PaperOut]);
+    // Healthy, but sitting on jobs waiting to retry: worth listing too.
+    $bar = Printer::factory()->create(['name' => 'Bar', 'status' => PrinterStatus::Ready]);
+    jobForPrinter($bar, PrintJobStatus::Held);
+    jobForPrinter($bar, PrintJobStatus::Held);
+    // Healthy and idle: must not appear.
+    Printer::factory()->create(['name' => 'Dolci', 'status' => PrinterStatus::Ready]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('openPrinterIssues')
+        ->assertSet('showPrinterIssues', true)
+        ->assertSeeInOrder(['Zeta Cassa', 'Bar', 'Cucina'])   // own printer first, then alphabetical
+        ->assertSee('Carta esaurita')
+        ->assertSee('2 in attesa')
+        ->assertDontSee('Dolci');
+
+    expect($component->get('printerIssues'))->toHaveCount(3);
+
+    $component->call('closePrinterIssues')->assertSet('showPrinterIssues', false);
+});
+
+it('says all is well when the printers recover while the list is open', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['name' => 'Cucina', 'status' => PrinterStatus::Offline]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('openPrinterIssues')
+        ->assertSee('Cucina');
+
+    // The list refreshes on the poll: the modal stays put and reassures.
+    $printer->update(['status' => PrinterStatus::Ready]);
+
+    $component->call('openPrinterIssues')
+        ->assertSet('showPrinterIssues', true)
+        ->assertSee('Nessun problema in corso');
+});
+
+it('ignores another register printer in the issues list', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $registerPrinter = Printer::factory()->create(['name' => 'Cassa 1', 'status' => PrinterStatus::Offline]);
+    $register = CashRegister::factory()->create(['printer_id' => $registerPrinter->id]);
+    $otherPrinter = Printer::factory()->create(['name' => 'Cassa 2', 'status' => PrinterStatus::Offline]);
+    CashRegister::factory()->create(['printer_id' => $otherPrinter->id]);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('openPrinterIssues')
+        ->assertSee('Cassa 1')
+        ->assertDontSee('Cassa 2');
 });
