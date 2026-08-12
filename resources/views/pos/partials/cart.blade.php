@@ -27,33 +27,43 @@
     {{-- Cart lines --}}
     <div class="flex-1 space-y-2 overflow-y-auto p-4">
         @if (! empty($cart))
-            <div class="flex items-center justify-between">
-                <span class="text-sm font-medium text-neutral-500">Carrello</span>
+            {{-- Negative margins pull the row's text back onto the same edges as
+                 the cards below, which the button's own padding would break. --}}
+            <div class="-mx-1 flex items-center justify-between pb-1">
+                <span class="px-1 text-sm font-medium uppercase tracking-wide text-neutral-400">Carrello</span>
                 <button type="button" wire:click="openClearCart"
-                    class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-red-600">
+                    class="inline-flex items-center gap-1 rounded-md px-1 py-1 text-sm font-medium text-red-600">
                     <x-heroicon-o-trash class="h-4 w-4" />
                     Svuota
                 </button>
             </div>
         @endif
         @forelse ($cart as $key => $line)
-            <div class="rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
-                <div class="flex items-center gap-2">
+            <div class="rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-800">
+                <div class="flex items-center gap-3">
+                    {{-- Name, its deviations and the note read as one block; the
+                         price is set apart, being a different kind of fact. --}}
                     <div class="min-w-0 flex-1">
-                        <div class="truncate text-base font-medium">{{ $line['name'] }}</div>
-                        @if ($this->lineNotes($line) !== '')
-                            <div class="truncate text-sm text-amber-600 dark:text-amber-500">{{ $this->lineNotes($line) }}</div>
-                        @endif
-                        @if (! empty($line['note']))
-                            <div class="truncate text-sm italic text-neutral-500">"{{ $line['note'] }}"</div>
-                        @endif
-                        <div class="text-sm text-neutral-500">{{ $this->money($this->lineTotal($line)) }}</div>
+                        <div class="space-y-0.5">
+                            <div class="truncate text-base font-medium leading-tight">{{ $line['name'] }}</div>
+                            @if ($this->lineNotes($line) !== '')
+                                <div class="truncate text-sm leading-tight text-amber-600 dark:text-amber-500">{{ $this->lineNotes($line) }}</div>
+                            @endif
+                            @if (! empty($line['note']))
+                                <div class="truncate text-sm italic leading-tight text-neutral-500">"{{ $line['note'] }}"</div>
+                            @endif
+                        </div>
+                        <div class="mt-1.5 text-sm tabular-nums text-neutral-500">{{ $this->money($this->lineTotal($line)) }}</div>
                     </div>
-                    <div class="flex items-center gap-1">
-                        <button type="button" wire:click="editLine('{{ $key }}')" title="Modifica" class="mr-1 flex h-10 w-10 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300"><x-heroicon-o-pencil-square class="h-5 w-5" /></button>
-                        <button type="button" wire:click="decrementLine('{{ $key }}')" class="flex h-10 w-10 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-minus class="h-5 w-5" /></button>
-                        <span class="w-8 text-center text-lg tabular-nums">{{ $line['quantity'] }}</span>
-                        <button type="button" wire:click="incrementLine('{{ $key }}')" class="flex h-10 w-10 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-plus class="h-5 w-5" /></button>
+                    {{-- Edit sits apart from the quantity stepper: one changes what
+                         the line is, the others only how many. --}}
+                    <div class="flex items-center gap-3">
+                        <button type="button" wire:click="editLine('{{ $key }}')" title="Modifica" class="flex h-10 w-10 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300"><x-heroicon-o-pencil-square class="h-5 w-5" /></button>
+                        <div class="flex items-center gap-1">
+                            <button type="button" wire:click="decrementLine('{{ $key }}')" class="flex h-10 w-10 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-minus class="h-5 w-5" /></button>
+                            <span class="w-8 text-center text-lg tabular-nums">{{ $line['quantity'] }}</span>
+                            <button type="button" wire:click="incrementLine('{{ $key }}')" class="flex h-10 w-10 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-plus class="h-5 w-5" /></button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -63,22 +73,24 @@
     </div>
 
     {{-- Totals + payment --}}
-    <div class="space-y-3 border-t border-neutral-200 p-4 dark:border-neutral-800">
-        <div class="space-y-3 text-sm">
+    <div class="space-y-4 border-t border-neutral-200 p-4 dark:border-neutral-800">
+        <div class="text-sm">
             @if ($this->discountAmount > 0 || $this->coverTotal > 0)
-                <div class="space-y-1">
-                    <div class="flex justify-between text-neutral-500"><span>Subtotale</span><span class="tabular-nums">{{ $this->money($this->cartTotal) }}</span></div>
+                {{-- The breakdown lines belong together and lead into the total,
+                     so they sit tight and the total gets the gap. --}}
+                <div class="mb-3 space-y-1">
+                    <div class="flex justify-between gap-3 text-neutral-500"><span class="truncate">Subtotale</span><span class="tabular-nums">{{ $this->money($this->cartTotal) }}</span></div>
                     @if ($this->coverTotal > 0)
-                        <div class="flex justify-between text-neutral-500"><span>Coperti ({{ $covers }} x {{ $this->money($this->coverCharge) }})</span><span class="tabular-nums">{{ $this->money($this->coverTotal) }}</span></div>
+                        <div class="flex justify-between gap-3 text-neutral-500"><span class="truncate">Coperti ({{ $covers }} x {{ $this->money($this->coverCharge) }})</span><span class="tabular-nums">{{ $this->money($this->coverTotal) }}</span></div>
                     @endif
                     @if ($this->discountAmount > 0)
-                        <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">- {{ $this->money($this->discountAmount) }}</span></div>
+                        <div class="flex justify-between gap-3 text-neutral-500"><span class="truncate">Sconto</span><span class="tabular-nums">- {{ $this->money($this->discountAmount) }}</span></div>
                     @endif
                 </div>
             @endif
-            <div class="flex items-center justify-between text-lg font-semibold">
+            <div class="flex items-center justify-between gap-3 text-lg font-semibold">
                 <span>Totale</span>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-3">
                     <span class="tabular-nums">{{ $this->money($this->orderTotal) }}</span>
                     <button type="button" wire:click="openDiscount" title="Sconto"
                         class="flex h-10 w-10 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300">

@@ -1,5 +1,12 @@
 <div class="flex flex-1 flex-col items-center justify-center gap-6 p-8">
-    <h1 class="text-2xl font-semibold">Seleziona la cassa</h1>
+    <div class="text-center">
+        <h1 class="text-2xl font-semibold">Seleziona la cassa</h1>
+        @unless ($this->day)
+            {{-- Choosing the station before the day is open is normal setup: say
+                 so, or picking one looks like it did nothing. --}}
+            <p class="mt-2 text-neutral-500">Nessuna giornata aperta: potrai battere ordini appena verrà aperta.</p>
+        @endunless
+    </div>
     <div class="flex flex-wrap justify-center gap-4">
         @foreach ($this->registers as $register)
             <button

@@ -1,33 +1,12 @@
 <header class="flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-3 dark:border-neutral-800 dark:bg-neutral-900">
     <div class="flex min-w-0 items-center gap-3">
+        {{-- The day can be missing: boards are laid out before the sagra opens. --}}
         <div class="flex items-baseline gap-3">
             <span class="text-lg font-semibold">{{ $this->cashRegister->name }}</span>
-            <span class="text-sm text-neutral-500">{{ $this->day->display_name }}</span>
+            <span class="text-sm text-neutral-500">{{ $this->day?->display_name ?? 'Nessuna giornata aperta' }}</span>
         </div>
 
-        {{-- Printer trouble badge. It lives here, in space the menu grid never
-             uses, so a printer going down cannot resize the grid under the
-             cashier's fingers. Polls on its own so a problem surfaces within
-             seconds even with no cart activity. Tap for the full list, which
-             the badge itself has no room for. --}}
-        <div wire:poll.5s>
-            @if ($alert = $this->printerAlert)
-                <button
-                    type="button"
-                    wire:key="printer-alert"
-                    wire:click="openPrinterIssues"
-                    title="Stato stampanti"
-                    @class([
-                        'flex max-w-64 items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold text-white',
-                        'bg-red-600 pos-alert-pulse' => $alert['level'] === 'danger',
-                        'bg-amber-500' => $alert['level'] === 'warning',
-                    ])
-                >
-                    <x-heroicon-o-printer class="h-4 w-4 shrink-0" />
-                    <span class="truncate">{{ $alert['message'] }}</span>
-                </button>
-            @endif
-        </div>
+        <livewire:pos.printer-badge :cash-register-id="$cashRegisterId" :key="'printer-badge-'.$cashRegisterId" />
     </div>
     <div class="flex items-center gap-1 text-neutral-600 dark:text-neutral-300">
         {{-- Transient feedback (drawer kick failures, out-of-stock blocks, ...). --}}
@@ -38,11 +17,14 @@
             class="mr-2 rounded-md bg-red-600 px-3 py-1 text-sm text-white"
             x-text="message"></div>
 
-        {{-- Cash drawer --}}
-        <button type="button" wire:click="openCashDrawer" title="Apri cassetto"
-            class="flex h-10 w-10 items-center justify-center rounded-md">
-            <x-heroicon-o-inbox-arrow-down class="h-6 w-6" />
-        </button>
+        {{-- Cash drawer. A selling control, out of the way while laying out
+             boards, where there is nothing to sell. --}}
+        @unless ($configuringBoard)
+            <button type="button" wire:click="openCashDrawer" title="Apri cassetto"
+                class="flex h-10 w-10 items-center justify-center rounded-md">
+                <x-heroicon-o-inbox-arrow-down class="h-6 w-6" />
+            </button>
+        @endunless
 
         {{-- Theme toggle --}}
         <button type="button" title="Cambia tema"
@@ -75,10 +57,19 @@
                     <div class="font-medium text-neutral-900 dark:text-neutral-100">{{ auth()->user()?->name }}</div>
                     <div class="text-neutral-500">{{ $this->cashRegister->name }}</div>
                 </div>
-                <button type="button" wire:click="changeRegister" class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm">
-                    <x-heroicon-o-building-storefront class="h-5 w-5" />
-                    Cambia postazione cassa
-                </button>
+                {{-- Both are hidden while laying out boards: that mode is left
+                     with "Fine", and a board is arranged for the station you are
+                     standing at, so the station cannot change underneath it. --}}
+                @unless ($configuringBoard)
+                    <button type="button" wire:click="enterBoardConfig" x-on:click="open = false" class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm">
+                        <x-heroicon-o-squares-2x2 class="h-5 w-5" />
+                        Modifica schede
+                    </button>
+                    <button type="button" wire:click="changeRegister" class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm">
+                        <x-heroicon-o-building-storefront class="h-5 w-5" />
+                        Cambia postazione cassa
+                    </button>
+                @endunless
                 <button type="button" wire:click="logout" class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-red-600">
                     <x-heroicon-o-arrow-right-start-on-rectangle class="h-5 w-5" />
                     Logout

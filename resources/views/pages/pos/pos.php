@@ -2,7 +2,6 @@
 
 use App\Enums\DiscountType;
 use App\Enums\PaymentMethod;
-use App\Enums\PrintJobStatus;
 use App\Exceptions\OrderException;
 use App\Exceptions\PrinterException;
 use App\Models\CashRegister;
@@ -10,15 +9,16 @@ use App\Models\Category;
 use App\Models\EventDay;
 use App\Models\Food;
 use App\Models\Ingredient;
+use App\Models\MenuTab;
+use App\Models\MenuTabItem;
 use App\Models\Order;
-use App\Models\Printer;
-use App\Models\PrintJob;
 use App\Models\StockReservation;
 use App\Printing\Documents\DrawerKick;
 use App\Printing\OrderPrinter;
 use App\Printing\PrinterConnection;
 use App\Settings\EventSettings;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
@@ -36,6 +36,44 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
      */
     #[Locked]
     public array $cart = [];
+
+    /** Board currently shown, null for the generated "Tutto" tab. */
+    #[Locked]
+    public ?int $selectedTabId = null;
+
+    /** Whether the board is being laid out rather than sold from. */
+    #[Locked]
+    public bool $configuringBoard = false;
+
+    /** Cell whose action sheet is open, in config mode. */
+    #[Locked]
+    public ?int $editingSlot = null;
+
+    /** Cell picked up and waiting for a destination tap. */
+    #[Locked]
+    public ?int $movingSlot = null;
+
+    public bool $showKeyPicker = false;
+
+    public string $keySearch = '';
+
+    public bool $showBoardForm = false;
+
+    /** Whether the board form is making a new board rather than editing one. */
+    #[Locked]
+    public bool $creatingBoard = false;
+
+    public bool $showDeleteBoard = false;
+
+    public bool $showStationBoards = false;
+
+    public string $boardName = '';
+
+    public string $boardDescription = '';
+
+    public int $boardColumns = 5;
+
+    public int $boardRows = 4;
 
     public ?int $customizingFoodId = null;
 
@@ -82,8 +120,6 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public bool $showReservationExpired = false;
 
-    public bool $showPrinterIssues = false;
-
     /**
      * Ingredients that ran short at checkout, shown in the sold-out modal.
      *
@@ -106,6 +142,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function mount(): void
     {
         $this->cashRegisterId = session('pos_cash_register_id');
+        $this->selectedTabId = $this->openingTabId();
     }
 
     #[Computed]
@@ -118,131 +155,8 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function cashRegister(): ?CashRegister
     {
         return $this->cashRegisterId !== null
-            ? CashRegister::active()->find($this->cashRegisterId)
+            ? CashRegister::active()->with('boards')->find($this->cashRegisterId)
             : null;
-    }
-
-    /**
-     * A warning for the cashier about the printers relevant to their work, or
-     * null when all is well. Relevant = this register's own printer plus every
-     * shared department printer (kitchen/bar) - a broken department printer means
-     * the comande won't come out - but not the other registers' printers. Polled
-     * by the POS header so problems surface within seconds.
-     *
-     * The message is kept short: it rides in a badge in the header (never in a
-     * band above the menu, which would resize the grid under the cashier's
-     * fingers), so it names the most relevant printer and counts the rest.
-     *
-     * @return array{level: string, message: string}|null
-     */
-    #[Computed]
-    public function printerAlert(): ?array
-    {
-        $printers = $this->relevantPrinters();
-
-        if ($printers->isEmpty()) {
-            return null;
-        }
-
-        $inError = $printers->filter(fn (Printer $printer): bool => ! $printer->status->canPrint());
-
-        if ($inError->isNotEmpty()) {
-            // The first one is this register's own printer when it is among them,
-            // otherwise the alphabetically first department printer.
-            $worst = $inError->first();
-            $others = $inError->count() - 1;
-
-            return [
-                'level' => 'danger',
-                'message' => "{$worst->name}: ".mb_strtolower($worst->status->getLabel()).($others > 0 ? " +{$others}" : ''),
-            ];
-        }
-
-        // Only Held jobs (waiting to retry) are actionable; Failed are terminal
-        // and belong to the admin log, not a permanent banner on the till.
-        $waiting = PrintJob::query()
-            ->whereIn('printer_id', $printers->pluck('id'))
-            ->where('status', PrintJobStatus::Held)
-            ->count();
-
-        if ($waiting > 0) {
-            return ['level' => 'warning', 'message' => "{$waiting} in attesa"];
-        }
-
-        return null;
-    }
-
-    /**
-     * The printers this cashier's work depends on: their own register's printer
-     * plus every shared department printer, their own first and the rest
-     * alphabetically. Other registers' printers are none of their business.
-     *
-     * @return Collection<int, Printer>
-     */
-    protected function relevantPrinters(): Collection
-    {
-        $registerPrinterId = $this->cashRegister?->printer_id;
-
-        return Printer::query()
-            ->active()
-            ->where(function ($query) use ($registerPrinterId): void {
-                $query->whereDoesntHave('cashRegister'); // department printers
-
-                if ($registerPrinterId !== null) {
-                    $query->orWhere('id', $registerPrinterId); // this register's own
-                }
-            })
-            ->get()
-            ->sortBy(fn (Printer $printer): array => [
-                $printer->id === $registerPrinterId ? 0 : 1,
-                $printer->name,
-            ])
-            ->values();
-    }
-
-    /**
-     * Every relevant printer that is either unable to print or sitting on jobs
-     * waiting to retry, in the same order as the badge. The full picture the
-     * badge has no room for, shown when the cashier taps it.
-     *
-     * @return array<int, array{name: string, status: string, blocked: bool, waiting: int}>
-     */
-    #[Computed]
-    public function printerIssues(): array
-    {
-        $printers = $this->relevantPrinters();
-
-        if ($printers->isEmpty()) {
-            return [];
-        }
-
-        $waitingByPrinter = PrintJob::query()
-            ->whereIn('printer_id', $printers->pluck('id'))
-            ->where('status', PrintJobStatus::Held)
-            ->selectRaw('printer_id, count(*) as total')
-            ->groupBy('printer_id')
-            ->pluck('total', 'printer_id');
-
-        return $printers
-            ->map(fn (Printer $printer): array => [
-                'name' => $printer->name,
-                'status' => $printer->status->getLabel(),
-                'blocked' => ! $printer->status->canPrint(),
-                'waiting' => (int) ($waitingByPrinter[$printer->id] ?? 0),
-            ])
-            ->filter(fn (array $issue): bool => $issue['blocked'] || $issue['waiting'] > 0)
-            ->values()
-            ->all();
-    }
-
-    public function openPrinterIssues(): void
-    {
-        $this->showPrinterIssues = true;
-    }
-
-    public function closePrinterIssues(): void
-    {
-        $this->showPrinterIssues = false;
     }
 
     /**
@@ -292,6 +206,578 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             ])
             ->filter(fn (array $group): bool => $group['foods']->isNotEmpty())
             ->values();
+    }
+
+    /**
+     * Every board, in the order they were created. That order is only the
+     * starting point for a station's own bar, which is then arranged per
+     * station. The generated "Tutto" tab is not one of them: it is always there
+     * and never configured.
+     *
+     * @return Collection<int, MenuTab>
+     */
+    #[Computed]
+    public function tabs(): Collection
+    {
+        return MenuTab::query()->ordered()->with('items')->get();
+    }
+
+    /**
+     * This station's tab bar, in order: each entry is a board, or the generated
+     * "Tutto" tab (a null board) which takes a place in the bar like any other.
+     *
+     * With nothing stored the bar is "Tutto" first, then every board in the
+     * order the organiser gave them: a fresh install needs no setup. Boards
+     * created after a station was arranged land at the end, shown, so a new
+     * board is never invisible everywhere by accident.
+     *
+     * @return Collection<int, array{tab: ?MenuTab, visible: bool}>
+     */
+    #[Computed]
+    public function stationLayout(): Collection
+    {
+        $boards = $this->tabs;
+        $stored = $this->cashRegister?->boards ?? collect();
+
+        if ($stored->isEmpty()) {
+            return collect([['tab' => null, 'visible' => true]])
+                ->concat($boards->map(fn (MenuTab $tab): array => ['tab' => $tab, 'visible' => true]))
+                ->values();
+        }
+
+        $byId = $boards->keyBy('id');
+        $entries = collect();
+        $placed = [];
+
+        foreach ($stored as $row) {
+            if ($row->menu_tab_id === null) {
+                // The complete tab is the safety net: it can be moved, never hidden.
+                $entries->push(['tab' => null, 'visible' => true]);
+
+                continue;
+            }
+
+            if (($tab = $byId->get($row->menu_tab_id)) !== null) {
+                $placed[] = $tab->id;
+                $entries->push(['tab' => $tab, 'visible' => $row->visible]);
+            }
+        }
+
+        foreach ($boards as $tab) {
+            if (! in_array($tab->id, $placed, true)) {
+                $entries->push(['tab' => $tab, 'visible' => true]);
+            }
+        }
+
+        if (! $entries->contains(fn (array $entry): bool => $entry['tab'] === null)) {
+            $entries->prepend(['tab' => null, 'visible' => true]);
+        }
+
+        return $entries->values();
+    }
+
+    /**
+     * The bar on screen: everything while arranging it, only what this station
+     * shows while selling.
+     *
+     * @return Collection<int, array{tab: ?MenuTab, visible: bool}>
+     */
+    #[Computed]
+    public function barEntries(): Collection
+    {
+        return $this->stationLayout->where('visible')->values();
+    }
+
+    /**
+     * The board this station opens on: the first one it shows. There is nothing
+     * else to keep in step, which is why no "default board" is stored anywhere.
+     */
+    protected function openingTabId(): ?int
+    {
+        return $this->stationLayout->firstWhere('visible')['tab']?->id;
+    }
+
+    /**
+     * The board on screen, or null while the "Tutto" tab is showing. A board
+     * that was deleted or deactivated mid-service falls back to "Tutto" instead
+     * of leaving the cashier on an empty screen.
+     */
+    #[Computed]
+    public function selectedTab(): ?MenuTab
+    {
+        if ($this->selectedTabId === null) {
+            return null;
+        }
+
+        // Only what this station shows can be worked on here: a board hidden
+        // here is arranged from a station that shows it, or shown again first.
+        return $this->barEntries->pluck('tab')->filter()->firstWhere('id', $this->selectedTabId);
+    }
+
+    /**
+     * The cells of the selected board, in order, one entry per cell: null for an
+     * empty cell, otherwise the food and whether it can still be sold.
+     *
+     * A food that is not on tonight's menu leaves its cell empty rather than
+     * letting the others slide up: the whole point of a board is that a key is
+     * always in the same place, on every evening of the sagra.
+     *
+     * While laying the board out that rule does not apply at all: every key that
+     * was placed shows, plain and available, as if the whole menu were on. The
+     * board is built once for the whole sagra, and what a given evening serves
+     * is a question for service time. The keys thin out on their own on the way
+     * out of config mode.
+     *
+     * @return array<int, array{food: Food, available: bool}|null>
+     */
+    #[Computed]
+    public function board(): array
+    {
+        $tab = $this->selectedTab;
+
+        if ($tab === null) {
+            return [];
+        }
+
+        $placedFoodIds = $tab->items->pluck('food_id');
+
+        $foods = $this->configuringBoard
+            ? Food::query()->whereIn('id', $placedFoodIds)->get()->keyBy('id')
+            : Food::query()
+                ->active()
+                ->availableOn($this->day)
+                ->with('ingredients')
+                ->whereIn('id', $placedFoodIds)
+                ->get()
+                ->keyBy('id');
+
+        $consumption = $this->configuringBoard ? [] : $this->cartConsumption();
+        $cells = array_fill(0, $tab->capacity(), null);
+
+        foreach ($tab->items as $item) {
+            $food = $foods->get($item->food_id);
+
+            // Beyond the board (it was shrunk), or off tonight's menu while
+            // selling: the cell stays empty.
+            if ($food === null || $item->slot >= $tab->capacity()) {
+                continue;
+            }
+
+            $cells[$item->slot] = [
+                'food' => $food,
+                'available' => $this->configuringBoard || $this->foodIsAvailable($food, $consumption),
+            ];
+        }
+
+        return $cells;
+    }
+
+    public function selectTab(?int $tabId = null): void
+    {
+        $this->selectedTabId = $tabId;
+        $this->resetBoardEditing();
+    }
+
+    /**
+     * Lay out the boards from the till itself: the organiser configures on the
+     * very tablet, at the very size, the cashier will use.
+     */
+    public function enterBoardConfig(): void
+    {
+        // Only a sale that can still be taken is worth protecting: with no day
+        // open the cart cannot be paid anyway, and refusing here would be mute,
+        // the notice living in a header that screen does not render.
+        if ($this->day !== null && $this->cart !== []) {
+            $this->dispatch('pos-notice', message: 'Concludi o annulla l\'ordine prima di modificare le schede.');
+
+            return;
+        }
+
+        $this->configuringBoard = true;
+        $this->refreshBoards();
+    }
+
+    public function exitBoardConfig(): void
+    {
+        $this->configuringBoard = false;
+        $this->resetBoardEditing();
+        $this->refreshBoards();
+    }
+
+    protected function resetBoardEditing(): void
+    {
+        $this->reset('editingSlot', 'movingSlot', 'showKeyPicker', 'keySearch', 'showBoardForm', 'creatingBoard', 'showDeleteBoard', 'showStationBoards');
+    }
+
+    /**
+     * A cell was tapped while laying out the board. Empty cells open the food
+     * picker, taken cells open their actions, and a cell picked up for a move
+     * lands on the next tap (swapping with whatever is there).
+     */
+    public function tapCell(int $slot): void
+    {
+        $tab = $this->selectedTab;
+
+        if (! $this->configuringBoard || $tab === null || $slot < 0 || $slot >= $tab->capacity()) {
+            return;
+        }
+
+        if ($this->movingSlot !== null) {
+            $this->dropOn($slot);
+
+            return;
+        }
+
+        $this->editingSlot = $slot;
+
+        if ($tab->items->firstWhere('slot', $slot) === null) {
+            $this->showKeyPicker = true;
+            $this->keySearch = '';
+        }
+    }
+
+    /**
+     * Land the cell being moved on its destination, swapping the two keys when
+     * the destination is taken. Both rows are dropped and rewritten so the
+     * unique index on (board, cell) never sees a duplicate mid-swap.
+     */
+    protected function dropOn(int $slot): void
+    {
+        $tab = $this->selectedTab;
+        $source = $tab?->items->firstWhere('slot', $this->movingSlot);
+
+        if ($tab === null || $source === null || $slot === $this->movingSlot) {
+            $this->reset('movingSlot');
+
+            return;
+        }
+
+        $destination = $tab->items->firstWhere('slot', $slot);
+        $vacated = $source->slot;
+
+        DB::transaction(function () use ($tab, $source, $destination, $slot, $vacated): void {
+            $movedFoodId = $source->food_id;
+            $swappedFoodId = $destination?->food_id;
+
+            $source->delete();
+            $destination?->delete();
+
+            MenuTabItem::create(['menu_tab_id' => $tab->id, 'food_id' => $movedFoodId, 'slot' => $slot]);
+
+            if ($swappedFoodId !== null) {
+                MenuTabItem::create(['menu_tab_id' => $tab->id, 'food_id' => $swappedFoodId, 'slot' => $vacated]);
+            }
+        });
+
+        $this->reset('movingSlot', 'editingSlot');
+        $this->refreshBoards();
+    }
+
+    /**
+     * Drop the cached boards after a layout change, so the grid on screen shows
+     * what was just saved.
+     */
+    protected function refreshBoards(): void
+    {
+        unset($this->cashRegister, $this->tabs, $this->stationLayout, $this->barEntries, $this->selectedTab, $this->board, $this->placeableFoods);
+    }
+
+    public function startMove(): void
+    {
+        $this->movingSlot = $this->editingSlot;
+        $this->editingSlot = null;
+    }
+
+    public function cancelCellActions(): void
+    {
+        $this->reset('editingSlot', 'movingSlot');
+    }
+
+    public function openKeyPicker(): void
+    {
+        $this->showKeyPicker = true;
+        $this->keySearch = '';
+    }
+
+    public function closeKeyPicker(): void
+    {
+        $this->reset('showKeyPicker', 'keySearch', 'editingSlot');
+    }
+
+    /**
+     * Put a food on the cell being edited, replacing whatever was there.
+     */
+    public function placeKey(int $foodId): void
+    {
+        $tab = $this->selectedTab;
+
+        if (! $this->configuringBoard || $tab === null || $this->editingSlot === null) {
+            return;
+        }
+
+        // A key twice on the same board is never intentional.
+        if ($tab->items->firstWhere('food_id', $foodId) !== null) {
+            $this->dispatch('pos-notice', message: 'Questa pietanza è già su questa scheda.');
+
+            return;
+        }
+
+        MenuTabItem::updateOrCreate(
+            ['menu_tab_id' => $tab->id, 'slot' => $this->editingSlot],
+            ['food_id' => $foodId],
+        );
+
+        $this->closeKeyPicker();
+        $this->refreshBoards();
+    }
+
+    public function removeKey(): void
+    {
+        $tab = $this->selectedTab;
+
+        if ($this->configuringBoard && $tab !== null && $this->editingSlot !== null) {
+            $tab->items()->where('slot', $this->editingSlot)->delete();
+            $this->refreshBoards();
+        }
+
+        $this->reset('editingSlot');
+    }
+
+    /**
+     * Open the board form, on the selected board or on a brand new one.
+     */
+    public function openBoardForm(bool $new = false): void
+    {
+        // Creating is a flag, never "nothing selected": clearing the selection
+        // would send the screen behind the form back to another board, and the
+        // organiser would lose their place for as long as the form is open.
+        $this->creatingBoard = $new;
+        $tab = $new ? null : $this->selectedTab;
+
+        $this->boardName = $tab?->name ?? '';
+        $this->boardDescription = $tab?->description ?? '';
+        $this->boardColumns = $tab?->columns ?? 5;
+        $this->boardRows = $tab?->rows ?? 4;
+        $this->showBoardForm = true;
+    }
+
+    public function closeBoardForm(): void
+    {
+        $this->reset('showBoardForm', 'creatingBoard');
+    }
+
+    public function saveBoard(): void
+    {
+        $this->validate([
+            'boardName' => 'required|string|max:100',
+            'boardDescription' => 'nullable|string|max:150',
+            'boardColumns' => 'required|integer|min:1|max:12',
+            'boardRows' => 'required|integer|min:1|max:12',
+        ], attributes: [
+            'boardName' => 'nome',
+            'boardDescription' => 'descrizione',
+            'boardColumns' => 'colonne',
+            'boardRows' => 'righe',
+        ]);
+
+        $tab = $this->creatingBoard ? null : $this->selectedTab;
+
+        if ($tab === null) {
+            $tab = MenuTab::create([
+                'name' => $this->boardName,
+                'description' => $this->boardDescription ?: null,
+                'columns' => $this->boardColumns,
+                'rows' => $this->boardRows,
+            ]);
+
+            $this->selectedTabId = $tab->id;
+            $this->closeBoardForm();
+            $this->refreshBoards();
+
+            return;
+        }
+
+        // Shrinking would silently drop the keys left outside. Say which ones
+        // instead: nothing the organiser laid out disappears without a word.
+        $capacity = $this->boardColumns * $this->boardRows;
+        $outside = $tab->items->where('slot', '>=', $capacity);
+
+        if ($outside->isNotEmpty()) {
+            $this->addError('boardColumns', "Svuota prima {$outside->count()} caselle: con questa dimensione resterebbero fuori dalla scheda.");
+
+            return;
+        }
+
+        $tab->update([
+            'name' => $this->boardName,
+            'description' => $this->boardDescription ?: null,
+            'columns' => $this->boardColumns,
+            'rows' => $this->boardRows,
+        ]);
+
+        $this->closeBoardForm();
+        $this->refreshBoards();
+    }
+
+    /**
+     * Show or hide the selected board on this station.
+     *
+     * "No selection stored" means "all of them", so hiding the first board has
+     * to write the remaining ones down, and a station that ends up showing every
+     * board goes back to storing nothing: that way a board created next week
+     * appears here too, unless someone deliberately restricted this station.
+     */
+    public function openStationBoards(): void
+    {
+        $this->showStationBoards = true;
+    }
+
+    public function closeStationBoards(): void
+    {
+        $this->showStationBoards = false;
+    }
+
+    /**
+     * Show or hide a board on this station. The complete "Tutto" tab has no id
+     * here and cannot be hidden: it is what guarantees nothing ever becomes
+     * unreachable through a configuration mistake.
+     */
+    public function toggleBoardHere(int $tabId): void
+    {
+        $this->writeStationLayout(
+            $this->stationLayout->map(fn (array $entry): array => $entry['tab']?->id === $tabId
+                ? [...$entry, 'visible' => ! $entry['visible']]
+                : $entry),
+        );
+    }
+
+    public function moveBoardHereUp(?int $tabId = null): void
+    {
+        $this->moveBoardHere($tabId, -1);
+    }
+
+    public function moveBoardHereDown(?int $tabId = null): void
+    {
+        $this->moveBoardHere($tabId, 1);
+    }
+
+    /**
+     * Swap an entry of this station's bar with its neighbour. Moving one to the
+     * front is also how a station is told what to open on.
+     */
+    protected function moveBoardHere(?int $tabId, int $direction): void
+    {
+        $entries = $this->stationLayout->all();
+        $index = null;
+
+        foreach ($entries as $position => $entry) {
+            if ($entry['tab']?->id === $tabId) {
+                $index = $position;
+                break;
+            }
+        }
+
+        if ($index === null) {
+            return;
+        }
+
+        $target = $index + $direction;
+
+        if ($target < 0 || $target >= count($entries)) {
+            return;
+        }
+
+        [$entries[$index], $entries[$target]] = [$entries[$target], $entries[$index]];
+
+        $this->writeStationLayout(collect($entries));
+    }
+
+    /**
+     * Store this station's bar as it now stands. The whole list is rewritten
+     * every time: positions stay dense and the unique index can never trip.
+     *
+     * @param  Collection<int, array{tab: ?MenuTab, visible: bool}>  $entries
+     */
+    protected function writeStationLayout(Collection $entries): void
+    {
+        $register = $this->cashRegister;
+
+        if (! $this->configuringBoard || $register === null) {
+            return;
+        }
+
+        DB::transaction(function () use ($register, $entries): void {
+            $register->boards()->delete();
+
+            foreach ($entries->values() as $position => $entry) {
+                $register->boards()->create([
+                    'menu_tab_id' => $entry['tab']?->id,
+                    'position' => $position,
+                    'visible' => $entry['visible'],
+                ]);
+            }
+        });
+
+        $this->refreshBoards();
+    }
+
+    /**
+     * Ask before dropping a board, stepping out of the board form so the two
+     * dialogs never stack. Cancelling puts the organiser back where they were.
+     */
+    public function openDeleteBoard(): void
+    {
+        if ($this->selectedTab !== null) {
+            $this->showBoardForm = false;
+            $this->showDeleteBoard = true;
+        }
+    }
+
+    public function cancelDeleteBoard(): void
+    {
+        $this->showDeleteBoard = false;
+        $this->showBoardForm = true;
+    }
+
+    public function deleteBoard(): void
+    {
+        $this->selectedTab?->delete();
+        $this->selectedTabId = null;
+        $this->resetBoardEditing();
+        $this->refreshBoards();
+    }
+
+    /**
+     * Foods that can go on the board being laid out. Every active food, not just
+     * tonight's: a board is built once for the whole sagra. Each is flagged with
+     * whether it is already on this board and whether it is on no board at all,
+     * so the organiser notices the ones no cashier would ever see.
+     *
+     * @return Collection<int, array{food: Food, placed: bool, orphan: bool}>
+     */
+    #[Computed]
+    public function placeableFoods(): Collection
+    {
+        $tab = $this->selectedTab;
+
+        if ($tab === null) {
+            return collect();
+        }
+
+        $placedHere = $tab->items->pluck('food_id')->all();
+        $placedAnywhere = MenuTabItem::query()->distinct()->pluck('food_id')->all();
+
+        return Food::query()
+            ->active()
+            ->when($this->keySearch !== '', fn ($query) => $query->whereLike('name', "%{$this->keySearch}%", caseSensitive: false))
+            ->with('category')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Food $food): array => [
+                'food' => $food,
+                'placed' => in_array($food->id, $placedHere, true),
+                'orphan' => ! in_array($food->id, $placedAnywhere, true),
+            ]);
     }
 
     #[Computed]
@@ -397,6 +883,9 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $this->cashRegisterId = $id;
         session(['pos_cash_register_id' => $id]);
         unset($this->cashRegister);
+
+        // Each station opens on the first board its own bar shows.
+        $this->selectedTabId = $this->openingTabId();
     }
 
     public function changeRegister(): void

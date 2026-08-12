@@ -8,6 +8,7 @@ use Database\Factories\CashRegisterFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class CashRegister extends Model
 {
@@ -15,6 +16,7 @@ class CashRegister extends Model
 
     /** @use HasFactory<CashRegisterFactory> */
     use HasFactory;
+
     use NormalizesName;
 
     protected $fillable = ['name', 'printer_id', 'active'];
@@ -29,5 +31,14 @@ class CashRegister extends Model
     public function printer(): BelongsTo
     {
         return $this->belongsTo(Printer::class);
+    }
+
+    /**
+     * This station's tab bar, in order. Empty means the default bar: see the
+     * table's migration for why it is implicit rather than stored.
+     */
+    public function boards(): HasMany
+    {
+        return $this->hasMany(CashRegisterBoard::class)->orderBy('position');
     }
 }

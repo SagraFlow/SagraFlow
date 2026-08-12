@@ -1137,3 +1137,33 @@ it('gives the held stock back when the order fails after the hold was claimed', 
         ->and($component->get('reservationId'))->toBeNull()
         ->and($component->get('cart'))->toHaveCount(1);  // cart kept for a retry
 });
+
+it('lets the tablet be assigned to its register before the day is open', function () {
+    // No open day: this is setup time, and the station is setup, not selling.
+    $register = CashRegister::factory()->create(['name' => 'Cassa Griglia']);
+
+    $component = Livewire::test('pages::pos')
+        ->assertSee('Seleziona la cassa')
+        ->assertSee('Nessuna giornata aperta')   // said up front, so the pick is not a dead end
+        ->call('selectRegister', $register->id)
+        ->assertSee('Cassa Griglia');            // now waiting for the day, station in hand
+
+    expect(session('pos_cash_register_id'))->toBe($register->id);
+
+    // And it can still be changed from there, which is the only screen reachable.
+    $component->call('changeRegister')
+        ->assertSee('Seleziona la cassa');
+
+    expect(session('pos_cash_register_id'))->toBeNull();
+});
+
+it('asks for the register before anything else once a day is open', function () {
+    openDay();
+    $register = CashRegister::factory()->create(['name' => 'Cassa Bar']);
+
+    Livewire::test('pages::pos')
+        ->assertSee('Seleziona la cassa')
+        ->assertDontSee('Nessuna giornata aperta')
+        ->call('selectRegister', $register->id)
+        ->assertDontSee('Seleziona la cassa');
+});
