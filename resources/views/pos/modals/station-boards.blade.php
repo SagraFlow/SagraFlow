@@ -4,7 +4,7 @@
             <h2 class="text-xl font-semibold">Schede di «{{ $this->cashRegister->name }}»</h2>
             <p class="mt-2 text-neutral-500">Quali schede vede questa postazione e in che ordine. <span class="font-medium text-neutral-700 dark:text-neutral-300">Si apre sulla prima che mostra.</span></p>
 
-            <div class="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">
+            <div class="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain">
                 @foreach ($this->stationLayout as $index => $entry)
                     @php($tab = $entry['tab'])
                     <div wire:key="station-{{ $tab?->id ?? 'all' }}" class="flex items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-800">

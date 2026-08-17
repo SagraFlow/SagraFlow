@@ -12,7 +12,10 @@
     @fonts
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="h-full bg-neutral-100 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
+{{-- overscroll-none: the till fills the viewport and never scrolls as a page,
+     so any vertical drag that reaches the document is a stray one. Refusing it
+     here keeps the interface still under the finger. --}}
+<body class="h-full overscroll-none bg-neutral-100 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
     {{ $slot }}
 </body>
 </html>

@@ -23,6 +23,10 @@ class FoodForm
                     ->label('Nome')
                     ->required()
                     ->maxLength(100),
+                TextInput::make('short_name')
+                    ->label('Nome breve')
+                    ->helperText('Mostrato solo sui tasti della cassa. Lascia vuoto per usare il nome completo.')
+                    ->maxLength(40),
                 Select::make('category_id')
                     ->label('Categoria')
                     ->relationship('category', 'name')

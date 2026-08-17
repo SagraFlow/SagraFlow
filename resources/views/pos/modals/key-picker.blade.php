@@ -10,10 +10,13 @@
                 class="mt-4 w-full rounded-lg border border-neutral-300 px-3 py-3 text-base dark:border-neutral-700 dark:bg-neutral-800"
             >
 
-            <div class="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">
+            <div class="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain">
                 @forelse ($this->placeableFoods as $option)
+                    {{-- The list is rewritten on every keystroke of the search,
+                         so each row has to carry its own identity. --}}
                     <button
                         type="button"
+                        wire:key="pick-{{ $option['food']->id }}"
                         wire:click="placeKey({{ $option['food']->id }})"
                         @disabled($option['placed'])
                         @class([

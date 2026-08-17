@@ -89,7 +89,13 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public ?string $customerName = null;
 
-    public int $covers = 0;
+    /**
+     * Null while the cashier has the field emptied to retype it: a
+     * non-nullable int would leave the property uninitialized, and writing a 0
+     * back straight away would fight the typing. Counts as no covers
+     * everywhere, and becomes a real 0 when the field is left.
+     */
+    public ?int $covers = 0;
 
     /** Per-cover charge (coperto) frozen when the sale started, in cents. */
     #[Locked]
@@ -180,7 +186,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     /**
      * Active categories with at least one food sellable on the open day.
      *
-     * @return Collection<int, array{category: Category, foods: Collection<int, Food>}>
+     * @return Collection<int, array{category: Category, foods: Collection<int, array{food: Food, available: bool, portionsLeft: ?int}>}>
      */
     #[Computed]
     public function menu(): Collection
@@ -202,6 +208,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
                     ->map(fn (Food $food): array => [
                         'food' => $food,
                         'available' => $this->foodIsAvailable($food, $consumption),
+                        'portionsLeft' => $this->foodPortionsLeft($food, $consumption),
                     ]),
             ])
             ->filter(fn (array $group): bool => $group['foods']->isNotEmpty())
@@ -328,7 +335,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
      * is a question for service time. The keys thin out on their own on the way
      * out of config mode.
      *
-     * @return array<int, array{food: Food, available: bool}|null>
+     * @return array<int, array{food: Food, available: bool, portionsLeft: ?int}|null>
      */
     #[Computed]
     public function board(): array
@@ -366,6 +373,9 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             $cells[$item->slot] = [
                 'food' => $food,
                 'available' => $this->configuringBoard || $this->foodIsAvailable($food, $consumption),
+                // No stock figure while laying the board out: the keys are shown
+                // there as they will be, not as tonight happens to have them.
+                'portionsLeft' => $this->configuringBoard ? null : $this->foodPortionsLeft($food, $consumption),
             ];
         }
 
@@ -935,21 +945,30 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public function updatedCovers(): void
     {
-        $this->covers = max(0, min(999, (int) $this->covers));
+        if ($this->covers === null) {
+            return;
+        }
+
+        $this->covers = max(0, min(999, $this->covers));
+    }
+
+    /**
+     * Called when the field is left: an empty box is only a step in typing, so
+     * it settles on the 0 it already counted as.
+     */
+    public function normalizeCovers(): void
+    {
+        $this->covers ??= 0;
     }
 
     public function incCovers(): void
     {
-        if ($this->covers < 999) {
-            $this->covers++;
-        }
+        $this->covers = min(999, (int) $this->covers + 1);
     }
 
     public function decCovers(): void
     {
-        if ($this->covers > 0) {
-            $this->covers--;
-        }
+        $this->covers = max(0, (int) $this->covers - 1);
     }
 
     /**
@@ -1361,7 +1380,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
                 $items,
                 $this->discountType !== null ? DiscountType::from($this->discountType) : null,
                 $this->discountValueForDomain(),
-                $this->covers,
+                (int) $this->covers,
                 $this->coverCharge,
                 $this->discountAppliesToCover,
                 $method === 'cash' ? $this->cashReceivedCents : null,
@@ -1648,6 +1667,34 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
 
         $this->reservationId = $reservation->id;
+    }
+
+    /**
+     * How many more base portions of the food the tracked stock still allows,
+     * after what the cart already takes: the scarcest of its tracked
+     * ingredients decides. Null when none of them is tracked - that is "no
+     * number to show", which is not the same as a zero.
+     *
+     * @param  array<int, int>  $consumption  ingredient id => units already in cart
+     */
+    protected function foodPortionsLeft(Food $food, array $consumption): ?int
+    {
+        $left = null;
+
+        foreach ($food->ingredients as $ingredient) {
+            // A dose of zero is an optional extra, not part of a base portion:
+            // it limits nothing here.
+            if ($ingredient->stock === null || $ingredient->pivot->quantity < 1) {
+                continue;
+            }
+
+            $free = max(0, $ingredient->stock - ($consumption[$ingredient->id] ?? 0));
+            $portions = intdiv($free, $ingredient->pivot->quantity);
+
+            $left = $left === null ? $portions : min($left, $portions);
+        }
+
+        return $left;
     }
 
     /**

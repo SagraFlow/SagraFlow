@@ -15,6 +15,9 @@ return new class extends Migration
             $table->id();
             $table->foreignId('category_id')->constrained()->restrictOnDelete();
             $table->string('name', 100)->unique();
+            // Optional label for the till keys, where a long name eats the
+            // space. Null means "no abbreviation needed": the full name is used.
+            $table->string('short_name', 40)->nullable();
             $table->unsignedInteger('price');
             $table->boolean('active')->default(true);
             $table->timestamps();

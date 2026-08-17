@@ -4,28 +4,32 @@
         <div>
             <label class="mb-1 block text-sm text-neutral-500">Nome Cliente</label>
             <input type="text" wire:model="customerName" maxlength="255" placeholder="Mario Rossi"
-                class="h-10 w-full rounded-lg border border-neutral-300 px-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
+                class="h-11 w-full rounded-lg border border-neutral-300 px-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
         </div>
-        <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2 min-w-0">
+        {{-- The stepper is sized by what it holds, not by a share of the row:
+             two 44px buttons plus a box where three digits sit with air around
+             them, the same on a 10" and on a wide screen. The table number
+             takes whatever is left. --}}
+        <div class="flex gap-3">
+            <div class="min-w-0 flex-1">
                 <label class="mb-1 block text-sm text-neutral-500">N. Tavolo</label>
                 <input type="number" min="1" max="9999" wire:model.live="tableNumber" placeholder="12"
-                    class="h-10 w-full rounded-lg border border-neutral-300 px-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
+                    class="h-11 w-full rounded-lg border border-neutral-300 px-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
             </div>
-            <div class="min-w-0">
+            <div class="w-36 shrink-0">
                 <label class="mb-1 block text-sm text-neutral-500">Coperti</label>
-                <div class="flex h-10 items-stretch overflow-hidden rounded-lg border border-neutral-300 dark:border-neutral-700">
-                    <button type="button" wire:click="decCovers" class="flex shrink-0 items-center justify-center border-r border-neutral-300 w-10 dark:border-neutral-700"><x-heroicon-m-minus class="h-5 w-5" /></button>
-                    <input type="number" min="0" max="999" wire:model.live="covers"
+                <div class="flex h-11 items-stretch overflow-hidden rounded-lg border border-neutral-300 dark:border-neutral-700">
+                    <button type="button" wire:click="decCovers" class="flex w-11 shrink-0 items-center justify-center border-r border-neutral-300 dark:border-neutral-700"><x-heroicon-m-minus class="h-5 w-5" /></button>
+                    <input type="number" min="0" max="999" wire:model.live="covers" wire:blur="normalizeCovers"
                         class="w-full min-w-0 border-0 bg-transparent px-1 text-center text-base tabular-nums focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none">
-                    <button type="button" wire:click="incCovers" class="flex shrink-0 items-center justify-center border-l border-neutral-300 w-10 dark:border-neutral-700"><x-heroicon-m-plus class="h-5 w-5" /></button>
+                    <button type="button" wire:click="incCovers" class="flex w-11 shrink-0 items-center justify-center border-l border-neutral-300 dark:border-neutral-700"><x-heroicon-m-plus class="h-5 w-5" /></button>
                 </div>
             </div>
         </div>
     </div>
 
     {{-- Cart lines --}}
-    <div class="flex-1 space-y-2 overflow-y-auto p-4">
+    <div class="flex-1 space-y-2 overflow-y-auto overscroll-contain p-4">
         @if (! empty($cart))
             {{-- Negative margins pull the row's text back onto the same edges as
                  the cards below, which the button's own padding would break. --}}
@@ -39,30 +43,37 @@
             </div>
         @endif
         @forelse ($cart as $key => $line)
-            <div class="rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-800">
-                <div class="flex items-center gap-3">
-                    {{-- Name, its deviations and the note read as one block; the
-                         price is set apart, being a different kind of fact. --}}
-                    <div class="min-w-0 flex-1">
-                        <div class="space-y-0.5">
-                            <div class="truncate text-base font-medium leading-tight">{{ $line['name'] }}</div>
-                            @if ($this->lineNotes($line) !== '')
-                                <div class="truncate text-sm leading-tight text-amber-600 dark:text-amber-500">{{ $this->lineNotes($line) }}</div>
-                            @endif
-                            @if (! empty($line['note']))
-                                <div class="truncate text-sm italic leading-tight text-neutral-500">"{{ $line['note'] }}"</div>
-                            @endif
-                        </div>
-                        <div class="mt-1.5 text-sm tabular-nums text-neutral-500">{{ $this->money($this->lineTotal($line)) }}</div>
-                    </div>
+            {{-- wire:key on the cart line: without it Livewire matches the rows
+                 by position, so removing one from the middle leaves the note and
+                 the quantity of the row below sitting on the wrong dish. The
+                 cart key already identifies a line by food, choices and note,
+                 which is exactly the identity the DOM needs.
+
+                 Name, its deviations and the note read as one block across the
+                 full width of the column: on a 10" tablet the buttons alongside
+                 left the name a hundred pixels and it was cut mid-word, which is
+                 the one thing on the line that must be read. The price and the
+                 buttons drop to a row of their own underneath. --}}
+            <div wire:key="line-{{ $key }}" class="rounded-lg border border-neutral-200 px-3 py-2.5 dark:border-neutral-800">
+                <div class="space-y-0.5">
+                    <div class="text-lg font-semibold leading-tight">{{ $line['name'] }}</div>
+                    @if ($this->lineNotes($line) !== '')
+                        <div class="text-sm leading-tight text-amber-600 dark:text-amber-500">{{ $this->lineNotes($line) }}</div>
+                    @endif
+                    @if (! empty($line['note']))
+                        <div class="text-sm italic leading-tight text-neutral-500">"{{ $line['note'] }}"</div>
+                    @endif
+                </div>
+                <div class="mt-2 flex items-center justify-between gap-2">
+                    <span class="text-base tabular-nums text-neutral-500">{{ $this->money($this->lineTotal($line)) }}</span>
                     {{-- Edit sits apart from the quantity stepper: one changes what
                          the line is, the others only how many. --}}
                     <div class="flex items-center gap-3">
-                        <button type="button" wire:click="editLine('{{ $key }}')" title="Modifica" class="flex h-10 w-10 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300"><x-heroicon-o-pencil-square class="h-5 w-5" /></button>
+                        <button type="button" wire:click="editLine('{{ $key }}')" title="Modifica" class="flex h-11 w-11 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300"><x-heroicon-o-pencil-square class="h-5 w-5" /></button>
                         <div class="flex items-center gap-1">
-                            <button type="button" wire:click="decrementLine('{{ $key }}')" class="flex h-10 w-10 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-minus class="h-5 w-5" /></button>
+                            <button type="button" wire:click="decrementLine('{{ $key }}')" class="flex h-11 w-11 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-minus class="h-5 w-5" /></button>
                             <span class="w-8 text-center text-lg tabular-nums">{{ $line['quantity'] }}</span>
-                            <button type="button" wire:click="incrementLine('{{ $key }}')" class="flex h-10 w-10 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-plus class="h-5 w-5" /></button>
+                            <button type="button" wire:click="incrementLine('{{ $key }}')" class="flex h-11 w-11 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-plus class="h-5 w-5" /></button>
                         </div>
                     </div>
                 </div>
@@ -93,7 +104,7 @@
                 <div class="flex items-center gap-3">
                     <span class="tabular-nums">{{ $this->money($this->orderTotal) }}</span>
                     <button type="button" wire:click="openDiscount" title="Sconto"
-                        class="flex h-10 w-10 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300">
+                        class="flex h-11 w-11 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300">
                         <x-heroicon-o-pencil-square class="h-5 w-5" />
                     </button>
                 </div>

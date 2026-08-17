@@ -1167,3 +1167,167 @@ it('asks for the register before anything else once a day is open', function () 
         ->call('selectRegister', $register->id)
         ->assertDontSee('Seleziona la cassa');
 });
+
+it('prints the food names on the keys at one fixed size', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    Food::factory()->create(['category_id' => Category::factory()->create()->id]);
+
+    // Fixed on purpose: the keys are read at a glance, and a name that changes
+    // size from one board or one screen to the next is read slower.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('text-xl font-semibold', escape: false);
+});
+
+it('counts an emptied covers field as no covers without refilling it', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $settings = app(EventSettings::class);
+    $settings->coverCharge = 200;
+    $settings->save();
+
+    // Deleting what is typed sends null. The box stays empty while the cashier
+    // types the new number, and counts as no covers in the meantime.
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->set('covers', 4)
+        ->set('covers', null)
+        ->assertSet('covers', null);
+
+    expect($component->instance()->coverTotal)->toBe(0);
+
+    // Leaving the field settles it on the 0 it already counted as.
+    $component->call('normalizeCovers')->assertSet('covers', 0);
+});
+
+it('counts up and down from an emptied covers field', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->set('covers', null)
+        ->call('incCovers')
+        ->assertSet('covers', 1)
+        ->set('covers', null)
+        ->call('decCovers')
+        ->assertSet('covers', 0)
+        ->set('covers', 999)
+        ->call('incCovers')
+        ->assertSet('covers', 999);
+});
+
+it('gives every menu key and cart line an identity of its own in the dom', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $food = Food::factory()->create(['category_id' => Category::factory()->create()->id]);
+
+    // Without these, Livewire matches by position: remove a line from the
+    // middle of the cart and the note or the quantity of the next one is left
+    // sitting on the wrong dish.
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('wire:key="food-'.$food->id.'"', escape: false)
+        ->call('addFood', $food->id);
+
+    $component->assertSee('wire:key="line-'.array_key_first($component->get('cart')).'"', escape: false);
+});
+
+it('abbreviates a key with the short name and keeps the full one everywhere else', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $food = Food::factory()->create([
+        'category_id' => Category::factory()->create()->id,
+        'name' => 'Salsiccia e patatine con pane',
+        'short_name' => 'Sals. + pat.',
+    ]);
+
+    // The abbreviation buys room on the key; the cart, and the receipt it is
+    // snapshotted into, say what the customer will read on paper.
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('Sals. + pat.')
+        ->assertDontSee('Salsiccia e patatine con pane')
+        ->call('addFood', $food->id)
+        ->assertSee('Salsiccia e patatine con pane');
+
+    expect(head($component->get('cart'))['name'])->toBe('Salsiccia e patatine con pane');
+});
+
+it('falls back to the full name on a key with no short name', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    Food::factory()->create([
+        'category_id' => Category::factory()->create()->id,
+        'name' => 'Brasato',
+        'short_name' => '   ',
+    ]);
+
+    // A field left blank (spaces included) is no abbreviation at all.
+    expect(Food::first()->short_name)->toBeNull();
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('Brasato');
+});
+
+it('shows the portions left on a key made of tracked stock', function () {
+    [$register, $food] = registerFoodTracked(7);
+
+    // Six after one goes in the cart: the key counts what can still be sold,
+    // not what the warehouse started with.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('7 porzioni')
+        ->call('addFood', $food->id)
+        ->assertSee('6 porzioni');
+});
+
+it('counts the portions by the scarcest tracked ingredient and its dose', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $food = Food::factory()->create(['category_id' => Category::factory()->create()->id]);
+    $bread = Ingredient::factory()->tracked(10)->create(['name' => 'Pane']);
+    $sausage = Ingredient::factory()->tracked(9)->create(['name' => 'Salsiccia']);
+    $food->ingredients()->attach($bread->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+    $food->ingredients()->attach($sausage->id, ['quantity' => 2, 'min_quantity' => 2, 'max_quantity' => 2]);
+
+    // Nine sausages at two apiece make four portions, and the ten loaves do not
+    // make it five: the shortest ingredient decides.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee('4 porzioni');
+});
+
+it('leaves a key without a stock figure when nothing it is made of is tracked', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $food = Food::factory()->create(['category_id' => Category::factory()->create()->id]);
+    $ingredient = Ingredient::factory()->create(['name' => 'Sale', 'stock' => null]);
+    $food->ingredients()->attach($ingredient->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 1]);
+
+    // Untracked is unlimited, and an unlimited food has no number to print: a
+    // blank there says that, a zero would say the opposite.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->assertSee($food->name)
+        ->assertDontSee('porzioni');
+});
+
+it('writes a cart line name across the whole column', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $food = Food::factory()->create([
+        'category_id' => Category::factory()->create()->id,
+        'name' => 'Brasato con polenta e funghi',
+    ]);
+
+    // The name sits on its own row, unclipped: sharing the row with the edit
+    // and quantity buttons left it a hundred pixels on a 10" tablet and cut it
+    // mid-word.
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->assertSee('<div class="text-lg font-semibold leading-tight">Brasato con polenta e funghi</div>', escape: false);
+});

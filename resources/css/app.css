@@ -16,6 +16,32 @@
 }
 
 /*
+ * The till is used by a finger, on a tablet, for hours. These hold for every
+ * button rather than being repeated in the markup: they cost nothing where they
+ * are not needed, and a button that was missed is one that behaves differently
+ * from all the others under the same finger.
+ *
+ * - touch-action: a fast double tap is a real gesture at a till (two portions
+ *   of the same dish); left alone Safari can read it as double-tap-to-zoom and
+ *   the whole interface jumps to a magnified view mid-order.
+ * - tap highlight and callout: iOS draws its own grey flash and, on a finger
+ *   that lingers, opens the text-selection callout over the button.
+ *
+ * The pressed state is deliberately NOT here: it belongs on the food keys and
+ * nowhere else. See the key component for why.
+ */
+@layer base {
+    button,
+    [role='button'] {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+}
+
+/*
  * Printer trouble badge on the till. One single slow breathing, from the moment
  * it appears until the problem is fixed: the cashier is often looking away
  * (giving change, talking to the customer), so a signal that stops after a few

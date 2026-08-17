@@ -21,7 +21,7 @@
              boards, where there is nothing to sell. --}}
         @unless ($configuringBoard)
             <button type="button" wire:click="openCashDrawer" title="Apri cassetto"
-                class="flex h-10 w-10 items-center justify-center rounded-md">
+                class="flex h-11 w-11 items-center justify-center rounded-md">
                 <x-heroicon-o-inbox-arrow-down class="h-6 w-6" />
             </button>
         @endunless
@@ -30,7 +30,7 @@
         <button type="button" title="Cambia tema"
             x-data="{ dark: document.documentElement.classList.contains('dark') }"
             x-on:click="dark = ! dark; document.documentElement.classList.toggle('dark', dark); localStorage.theme = dark ? 'dark' : 'light'"
-            class="flex h-10 w-10 items-center justify-center rounded-md">
+            class="flex h-11 w-11 items-center justify-center rounded-md">
             <x-heroicon-o-sun class="h-6 w-6" x-show="dark" x-cloak />
             <x-heroicon-o-moon class="h-6 w-6" x-show="! dark" x-cloak />
         </button>
@@ -40,7 +40,7 @@
             x-data="{ fs: false }"
             x-init="document.addEventListener('fullscreenchange', () => fs = !! document.fullscreenElement)"
             x-on:click="document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()"
-            class="flex h-10 w-10 items-center justify-center rounded-md">
+            class="flex h-11 w-11 items-center justify-center rounded-md">
             <x-heroicon-o-arrows-pointing-out class="h-6 w-6" x-show="! fs" x-cloak />
             <x-heroicon-o-arrows-pointing-in class="h-6 w-6" x-show="fs" x-cloak />
         </button>
@@ -48,7 +48,7 @@
         {{-- User menu --}}
         <div class="relative" x-data="{ open: false }">
             <button type="button" x-on:click="open = ! open" title="{{ auth()->user()?->name }}"
-                class="flex h-10 w-10 items-center justify-center rounded-md">
+                class="flex h-11 w-11 items-center justify-center rounded-md">
                 <x-heroicon-o-user-circle class="h-7 w-7" />
             </button>
             <div x-show="open" x-on:click.outside="open = false" x-transition x-cloak

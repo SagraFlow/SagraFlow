@@ -8,7 +8,7 @@
         <span class="text-base font-semibold">Configurazione schede</span>
     </div>
 
-    <div class="flex-1 space-y-5 overflow-y-auto p-4">
+    <div class="flex-1 space-y-5 overflow-y-auto overscroll-contain p-4">
         @if ($movingSlot !== null)
             <div class="rounded-lg bg-neutral-100 p-3 dark:bg-neutral-800">
                 <p class="font-medium">Tocca la casella di destinazione.</p>
@@ -28,7 +28,7 @@
             @else
                 <div>
                     {{-- The button sits beside the whole block, not inside the
-                         title's line: a 40px control in there stretches the line
+                         title's line: a 44px control in there stretches the line
                          box and opens a gap under the name. Pinned right, so its
                          place never depends on how long a board is called. --}}
                     <div class="flex items-start gap-2">
@@ -40,7 +40,7 @@
                             <div class="mt-0.5 text-sm leading-tight text-neutral-500">{{ $this->selectedTab->columns }} colonne x {{ $this->selectedTab->rows }} righe</div>
                         </div>
                         <button type="button" wire:click="openBoardForm" title="Nome, descrizione e dimensioni"
-                            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300">
+                            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300">
                             <x-heroicon-o-pencil-square class="h-5 w-5" />
                         </button>
                     </div>
