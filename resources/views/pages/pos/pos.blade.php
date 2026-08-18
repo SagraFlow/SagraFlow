@@ -32,6 +32,7 @@
         @include('pos.modals.sold-out')
         @include('pos.modals.reservation-expired')
         @include('pos.modals.cash')
+        @include('pos.modals.free-order')
         @include('pos.modals.card')
         @include('pos.modals.discount')
         @include('pos.modals.confirmation')

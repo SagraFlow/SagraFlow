@@ -2,7 +2,6 @@
 
 namespace App\Printing;
 
-use App\Enums\PaymentMethod;
 use App\Enums\PrintDestination;
 use App\Enums\PrintJobType;
 use App\Models\Order;
@@ -35,10 +34,10 @@ class OrderPrintRouter
                 $registerPrinter,
                 PrintJobType::CustomerReceipt,
                 'Scontrino',
-                [
-                    'eventName' => $settings->eventName,
-                    'openDrawer' => $order->payment_method === PaymentMethod::Cash,
-                ],
+                // The drawer is not this document's business: a cash sale opens
+                // it when its payment screen opens, long before the receipt is
+                // printed, and by then the cashier has usually closed it again.
+                ['eventName' => $settings->eventName],
             ),
         ];
 

@@ -7,14 +7,13 @@ use Mike42\Escpos\Printer;
 
 /**
  * Customer receipt (scontrino) printed at the ordering register: full order
- * with prices and total, optionally kicking the cash drawer.
+ * with prices and total.
  */
 class CustomerReceipt extends Document
 {
     public function __construct(
         private Order $order,
         private string $eventName,
-        private bool $openDrawer,
         private ?string $logoPath = null,
     ) {}
 
@@ -104,9 +103,6 @@ class CustomerReceipt extends Document
         $printer->text($this->columns($this->localDateTime($order->paid_at), "#{$order->number}"));
 
         $printer->feed(2);
-        if ($this->openDrawer) {
-            $printer->pulse();
-        }
         $printer->cut();
     }
 }

@@ -25,6 +25,9 @@ class CashRegistersTable
                 TextColumn::make('printer.name')
                     ->label('Stampante locale')
                     ->placeholder('-'),
+                TextColumn::make('cardTerminal.name')
+                    ->label('Terminale POS')
+                    ->placeholder('-'),
                 IconColumn::make('active')
                     ->label('Attiva')
                     ->boolean(),

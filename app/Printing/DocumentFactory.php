@@ -29,7 +29,6 @@ class DocumentFactory
             PrintJobType::CustomerReceipt => new CustomerReceipt(
                 $this->requireOrder($order, $type),
                 $spec['eventName'] ?? '',
-                (bool) ($spec['openDrawer'] ?? false),
                 $this->logoPath(),
             ),
             PrintJobType::DepartmentTicket => new DepartmentTicket(

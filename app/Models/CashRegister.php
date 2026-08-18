@@ -19,7 +19,7 @@ class CashRegister extends Model
 
     use NormalizesName;
 
-    protected $fillable = ['name', 'printer_id', 'active'];
+    protected $fillable = ['name', 'printer_id', 'card_terminal_id', 'active'];
 
     protected function casts(): array
     {
@@ -31,6 +31,15 @@ class CashRegister extends Model
     public function printer(): BelongsTo
     {
         return $this->belongsTo(Printer::class);
+    }
+
+    /**
+     * The card terminal this station takes card payments on. Null while a
+     * station has none: the card flow then stays the manual one.
+     */
+    public function cardTerminal(): BelongsTo
+    {
+        return $this->belongsTo(CardTerminal::class);
     }
 
     /**

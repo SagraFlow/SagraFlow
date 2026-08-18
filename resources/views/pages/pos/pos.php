@@ -1,9 +1,13 @@
 <?php
 
+use App\CardPayments\PaymentRunner;
+use App\Enums\CardTransactionStatus;
 use App\Enums\DiscountType;
 use App\Enums\PaymentMethod;
 use App\Exceptions\OrderException;
 use App\Exceptions\PrinterException;
+use App\Jobs\SendCardPaymentJob;
+use App\Models\CardTransaction;
 use App\Models\CashRegister;
 use App\Models\Category;
 use App\Models\EventDay;
@@ -120,6 +124,9 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public bool $showCardModal = false;
 
+    /** Confirming an order that costs nothing: a discount covered it all. */
+    public bool $showFreeOrder = false;
+
     public bool $showClearCart = false;
 
     public bool $showSoldOut = false;
@@ -136,6 +143,49 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     /** Id of the stock reservation held while a payment is in progress. */
     #[Locked]
     public ?int $reservationId = null;
+
+    /**
+     * The card payment attempt on the terminal, when this station has one.
+     * Null means the card is being taken the old way: on the terminal by hand,
+     * with the cashier confirming what she saw.
+     */
+    #[Locked]
+    public ?int $cardTransactionId = null;
+
+    /**
+     * The station currently holding this station's terminal, when the card flow
+     * could not even start. Kept apart from "no terminal at all": there the
+     * cashier is the one working the POS and confirms what she saw, while here
+     * the POS is busy with somebody else's customer and there is nothing for
+     * her to have seen.
+     */
+    #[Locked]
+    public ?string $terminalBusyWith = null;
+
+    /**
+     * Set when the terminal that was busy has since come free. It is only an
+     * announcement: the cashier presses when she has the terminal in front of
+     * her, because a POS that has just finished is still in the other cashier's
+     * hands - the customer is taking their card back, the receipt is being torn
+     * off - and an amount sent then would appear on a device somebody else is
+     * holding.
+     */
+    #[Locked]
+    public bool $terminalFreeAgain = false;
+
+    /**
+     * A payment on this station that ended without an answer and has not been
+     * settled: sending another one before somebody has looked at the terminal
+     * is how a customer gets charged twice.
+     *
+     * @var array{amount: string, at: string}|null
+     */
+    #[Locked]
+    public ?array $unresolvedPayment = null;
+
+    /** Set once the cashier says she has looked. Lasts for this sale only. */
+    #[Locked]
+    public bool $unresolvedAcknowledged = false;
 
     /** Cash tendered, in cents (authoritative). */
     public int $cashReceivedCents = 0;
@@ -1210,9 +1260,54 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         return null;
     }
 
+    /**
+     * An order a discount has covered entirely. There is no tender to choose,
+     * so there is one button and one confirmation: nothing is taken, and the
+     * cash drawer stays shut.
+     */
+    public function startFreeOrder(): void
+    {
+        if ($this->cart === [] || $this->orderTotal !== 0) {
+            return;
+        }
+
+        if ($blocker = $this->checkoutBlocker()) {
+            $this->addError('checkout', $blocker);
+
+            return;
+        }
+
+        // The stock is held like any other checkout: nothing was paid, but the
+        // portions are just as gone.
+        if (! $this->ensureReserved()) {
+            return;
+        }
+
+        $this->showFreeOrder = true;
+    }
+
+    public function closeFreeOrder(): void
+    {
+        $this->showFreeOrder = false;
+        $this->releaseReservation();
+    }
+
+    public function confirmFreeOrder(): void
+    {
+        if ($this->orderTotal !== 0) {
+            return;
+        }
+
+        $this->finalize('none');
+    }
+
     public function startCash(): void
     {
         if ($this->cart === []) {
+            return;
+        }
+
+        if ($this->orderTotal === 0) {
             return;
         }
 
@@ -1228,6 +1323,13 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
         $this->resetCash();
         $this->showCashModal = true;
+
+        // The drawer opens with the payment screen, not with the receipt: the
+        // cashier counts the change while the customer is still handing over
+        // the money, instead of waiting for a confirmation she has not made
+        // yet. It stays open through the exchange, which is why the receipt no
+        // longer kicks it.
+        $this->openCashDrawer();
     }
 
     public function updatedCashInput(): void
@@ -1286,6 +1388,11 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
+        // Nothing to charge: this sale is confirmed, not paid.
+        if ($this->orderTotal === 0) {
+            return;
+        }
+
         if ($blocker = $this->checkoutBlocker()) {
             $this->addError('checkout', $blocker);
 
@@ -1297,24 +1404,230 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
 
         $this->showCardModal = true;
+        $this->askTerminal();
+    }
+
+    /**
+     * Sends the amount to this station's terminal, when it has one. A station
+     * without a terminal, or one whose terminal is taken, simply falls back to
+     * the manual flow the modal has always offered: the sale must never stop
+     * because the integration cannot go ahead.
+     */
+    protected function askTerminal(): void
+    {
+        $this->cardTransactionId = null;
+        $this->terminalBusyWith = null;
+        $this->terminalFreeAgain = false;
+        $this->unresolvedPayment = null;
+
+        if ($this->cashRegister?->cardTerminal === null) {
+            return;
+        }
+
+        // Nothing about the claim stops this: the terminal was taken by this
+        // very station, so asking again would simply renew the hold and send a
+        // second amount for a payment that may already have gone through.
+        if (! $this->unresolvedAcknowledged && ($unresolved = $this->unresolvedCardPayment()) !== null) {
+            $this->unresolvedPayment = [
+                'amount' => $this->money($unresolved->amount_cents),
+                'at' => $unresolved->created_at?->setTimezone(app(EventSettings::class)->timezone)->format('H:i') ?? '-',
+            ];
+
+            return;
+        }
+
+        $attempt = app(PaymentRunner::class)->start($this->cashRegister, $this->orderTotal);
+
+        if ($attempt === null) {
+            // Taken by another station. The card flow cannot start at all, and
+            // the modal says so instead of falling back to a confirmation the
+            // cashier has no way of making: whatever is happening on that
+            // terminal is somebody else's customer.
+            $this->terminalBusyWith = $this->cashRegister->cardTerminal->fresh()->busyRegisterName() ?? '-';
+
+            return;
+        }
+
+        $this->cardTransactionId = $attempt->id;
+        SendCardPaymentJob::dispatchFor($attempt);
+    }
+
+    /**
+     * Watched while the card modal is stuck on a busy terminal. The moment the
+     * other station gives it back, the amount goes out: the cashier already
+     * asked for a card payment, and making her ask again would only give the
+     * terminal away to whoever taps first.
+     */
+    public function watchTerminal(): void
+    {
+        if ($this->terminalBusyWith === null || ! $this->showCardModal) {
+            return;
+        }
+
+        $terminal = $this->cashRegister?->cardTerminal?->fresh();
+        $free = $terminal !== null && $terminal->isAvailableFor($this->cashRegister);
+
+        // It can go back and forth: another station may take it again while
+        // this one waits, and the modal has to say what is true now.
+        if ($free && ! $this->terminalFreeAgain) {
+            $this->dispatch('pos-notice', message: 'Terminale libero: prendilo e premi Riprova.');
+        }
+
+        $this->terminalFreeAgain = $free;
+        $this->terminalBusyWith = $free
+            ? $this->terminalBusyWith
+            : ($terminal?->busyRegisterName() ?? $this->terminalBusyWith);
+    }
+
+    /**
+     * The last payment on this station left hanging: no answer from the
+     * terminal, and no order behind it. Recent ones only - a doubt from two
+     * hours ago is a matter for the admin list, not for the cashier in front of
+     * a queue.
+     */
+    protected function unresolvedCardPayment(): ?CardTransaction
+    {
+        return CardTransaction::query()
+            ->where('cash_register_id', $this->cashRegisterId)
+            ->where('status', CardTransactionStatus::Unknown)
+            ->whereNull('order_id')
+            ->where('created_at', '>', now()->subMinutes(30))
+            ->latest()
+            ->first();
+    }
+
+    /**
+     * "I have looked at the terminal." Taken at her word for the rest of this
+     * sale: she is the one who can see the screen, and a warning that cannot be
+     * dismissed is a warning that gets learned around.
+     */
+    public function acknowledgeUnresolved(): void
+    {
+        $this->unresolvedAcknowledged = true;
+        $this->askTerminal();
+    }
+
+    /** The attempt the modal is watching, if any. */
+    #[Computed]
+    public function cardTransaction(): ?CardTransaction
+    {
+        return $this->cardTransactionId !== null ? CardTransaction::find($this->cardTransactionId) : null;
+    }
+
+    /**
+     * Watched by the modal while the customer is on the terminal. An approved
+     * payment closes the sale on its own: the cashier has nothing left to
+     * confirm, and asking her to would only add a way to get it wrong.
+     */
+    public function pollCardPayment(): void
+    {
+        unset($this->cardTransaction);
+
+        if ($this->cardTransaction?->isApproved()) {
+            $this->finalize('card');
+        }
+    }
+
+    /**
+     * Sends the amount again after a refusal or a failure - never after an
+     * unanswered attempt, which has to be resolved with the terminal first.
+     */
+    public function retryCardPayment(): void
+    {
+        if ($this->cardTransaction?->needsAnswer() ?? false) {
+            return;
+        }
+
+        $this->askTerminal();
     }
 
     public function closeCard(): void
     {
+        // A payment under way is not something to walk away from: the customer
+        // is at the terminal and the answer is about to arrive.
+        if ($this->cardPaymentPending()) {
+            return;
+        }
+
+        $this->releaseTerminalClaim();
         $this->showCardModal = false;
+        $this->cardTransactionId = null;
+        $this->terminalBusyWith = null;
+        $this->terminalFreeAgain = false;
+        $this->unresolvedPayment = null;
         $this->releaseReservation();
     }
 
     public function cardToCash(): void
     {
+        if ($this->cardPaymentPending()) {
+            return;
+        }
+
         // Keep the reservation: the sale is still going, only the tender changes.
+        $this->releaseTerminalClaim();
         $this->showCardModal = false;
+        $this->cardTransactionId = null;
+        $this->terminalBusyWith = null;
+        $this->terminalFreeAgain = false;
+        $this->unresolvedPayment = null;
         $this->startCash();
     }
 
+    /**
+     * The cashier says it went through. Available whatever the integration
+     * thinks, because she is the one looking at the terminal - and marked as
+     * hers, so a row that was closed by a person can always be told from one
+     * the terminal closed.
+     */
     public function confirmCard(): void
     {
+        // Nothing to confirm: the terminal is taking someone else's payment, or
+        // is still taking this one - a stale page in her hand must not be able
+        // to close a sale over a customer who is mid-PIN.
+        if ($this->terminalBusyWith !== null || $this->unresolvedPayment !== null || $this->cardPaymentPending()) {
+            return;
+        }
+
+        $this->cardTransaction?->update([
+            'status' => CardTransactionStatus::Approved,
+            'manual' => true,
+            'completed_at' => now(),
+        ]);
+
         $this->finalize('card');
+    }
+
+    /**
+     * Whether the terminal is still working on this station's payment.
+     *
+     * An attempt that has been open far longer than a payment can take does not
+     * count: the worker died or never ran, and leaving the cashier on a waiting
+     * screen that will never end is the worst thing this modal could do.
+     */
+    public function cardPaymentPending(): bool
+    {
+        $attempt = $this->cardTransaction;
+
+        return $attempt !== null
+            && $attempt->status === CardTransactionStatus::Pending
+            && ! $attempt->isStuck();
+    }
+
+    /**
+     * Gives the terminal back when the sale leaves the card flow. An attempt
+     * with no answer keeps it: until someone finds out what happened, nobody
+     * else may start a transaction on that terminal.
+     */
+    protected function releaseTerminalClaim(): void
+    {
+        $attempt = $this->cardTransaction;
+
+        if ($attempt === null || $attempt->needsAnswer()) {
+            return;
+        }
+
+        $this->cashRegister?->cardTerminal?->release($this->cashRegister);
     }
 
     protected function finalize(string $method): void
@@ -1417,8 +1730,14 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             report($e);
         }
 
+        // Tie the payment attempt to the order it paid for: from here on the two
+        // are read together, and a card transaction with no order is exactly the
+        // thing someone must go and look at.
+        $this->cardTransaction?->update(['order_id' => $order->id]);
+        unset($this->cardTransaction);
+
         $this->placedOrderNumber = $order->number;
-        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'cashReceivedCents', 'cashInput', 'reservationId', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
+        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'showFreeOrder', 'cashReceivedCents', 'cashInput', 'reservationId', 'cardTransactionId', 'terminalBusyWith', 'terminalFreeAgain', 'unresolvedPayment', 'unresolvedAcknowledged', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
     }
 
     public function newOrder(): void

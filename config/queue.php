@@ -75,6 +75,20 @@ return [
             'after_commit' => false,
         ],
 
+        // Card payments wait on a person: a customer looking for a card, a PIN
+        // typed twice. They need a reservation window far longer than a print,
+        // and they get their own connection rather than stretching everyone
+        // else's - a job released back to the queue while it is still running
+        // would mean asking a terminal for the same money twice.
+        'redis-payments' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => 'payments',
+            'retry_after' => (int) env('REDIS_PAYMENTS_RETRY_AFTER', 300),
+            'block_for' => (int) env('REDIS_QUEUE_BLOCK_FOR', 5),
+            'after_commit' => false,
+        ],
+
         'deferred' => [
             'driver' => 'deferred',
         ],

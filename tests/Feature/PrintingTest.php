@@ -66,7 +66,7 @@ function orderWithRoute(bool $grouped = true, PrintDestination $destination = Pr
 it('renders a customer receipt with prices, total and payment', function () {
     ['order' => $order] = orderWithRoute();
 
-    $data = (new CustomerReceipt($order->load('lines'), 'Sagra Test', true))->render();
+    $data = (new CustomerReceipt($order->load('lines'), 'Sagra Test'))->render();
 
     expect($data)
         ->toContain('Sagra Test')
@@ -86,8 +86,8 @@ it('prints the configured logo on the receipt', function () {
     imagepng($image, $path);
     imagedestroy($image);
 
-    $withLogo = (new CustomerReceipt($order, 'Sagra Test', false, $path))->render();
-    $withoutLogo = (new CustomerReceipt($order, 'Sagra Test', false, null))->render();
+    $withLogo = (new CustomerReceipt($order, 'Sagra Test', $path))->render();
+    $withoutLogo = (new CustomerReceipt($order, 'Sagra Test', null))->render();
 
     expect(strlen($withLogo))->toBeGreaterThan(strlen($withoutLogo));
 
@@ -105,7 +105,7 @@ it('shows the amount received and change on a cash receipt', function () {
     expect($order->total)->toBe(1000)
         ->and($order->changeGiven())->toBe(1000);
 
-    $data = (new CustomerReceipt($order->load('lines'), 'Sagra', false))->render();
+    $data = (new CustomerReceipt($order->load('lines'), 'Sagra'))->render();
 
     expect($data)->toContain('Ricevuto')->toContain('Resto');
 });
@@ -114,7 +114,7 @@ it('ignores a missing logo without breaking the receipt', function () {
     ['order' => $order] = orderWithRoute();
     $order->load('lines');
 
-    $data = (new CustomerReceipt($order, 'Sagra Test', false, '/does/not/exist.png'))->render();
+    $data = (new CustomerReceipt($order, 'Sagra Test', '/does/not/exist.png'))->render();
 
     expect($data)->toContain('Sagra Test');
 });
@@ -293,7 +293,7 @@ it('does not start the receipt with a blank gap when it has no header', function
     $order->load('lines');
 
     // Empty event name and no logo: nothing is printed above the details.
-    $data = (new CustomerReceipt($order, '', false, null))->render();
+    $data = (new CustomerReceipt($order, '', null))->render();
     // The body starts at the first rule (a run of 0xC4, the encoded U+2500).
     $header = substr($data, 0, strpos($data, str_repeat("\xc4", 10)));
 
@@ -304,7 +304,7 @@ it('separates the receipt header from the details when it has an event name', fu
     ['order' => $order] = orderWithRoute();
     $order->load('lines');
 
-    $data = (new CustomerReceipt($order, 'Sagra Test', false, null))->render();
+    $data = (new CustomerReceipt($order, 'Sagra Test', null))->render();
     // The body starts at the first rule (a run of 0xC4, the encoded U+2500).
     $header = substr($data, 0, strpos($data, str_repeat("\xc4", 10)));
 

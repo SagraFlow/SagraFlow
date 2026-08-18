@@ -143,6 +143,40 @@
         </div>
     </div>
 
+    {{-- What the terminal said, for an order paid on one. Shown here because
+         this is the page someone opens when a customer disputes a charge or a
+         figure has to be matched against the bank's own report. --}}
+    @if ($card = $order->cardTransaction)
+        <div class="od-info">
+            <div class="od-cell">
+                <div class="od-cell-label">Autorizzazione</div>
+                <div class="od-cell-value">{{ $card->authorization_code ?? '-' }}</div>
+            </div>
+            <div class="od-cell">
+                <div class="od-cell-label">Carta</div>
+                <div class="od-cell-value">{{ trim(($card->cardTypeLabel() ?? '').($card->pan_last4 ? ' ****'.$card->pan_last4 : '')) ?: '-' }}</div>
+            </div>
+            <div class="od-cell">
+                <div class="od-cell-label">STAN</div>
+                <div class="od-cell-value">{{ $card->stan ?? '-' }}</div>
+            </div>
+            <div class="od-cell">
+                <div class="od-cell-label">Terminale</div>
+                <div class="od-cell-value">{{ $card->terminal_id }}</div>
+            </div>
+            <div class="od-cell">
+                <div class="od-cell-label">Esito</div>
+                <div class="od-cell-value">{{ $card->status->getLabel() }}</div>
+            </div>
+            <div class="od-cell">
+                {{-- The distinction that explains a difference at closing: this
+                     one was declared by a person, not by the terminal. --}}
+                <div class="od-cell-label">Confermato</div>
+                <div class="od-cell-value">{{ $card->manual ? 'a mano dalla cassa' : 'dal terminale' }}</div>
+            </div>
+        </div>
+    @endif
+
     {{-- Products grouped by category --}}
     <div>
         <div class="od-heading">Prodotti <span>{{ $productCount }}</span></div>

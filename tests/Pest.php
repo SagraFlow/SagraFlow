@@ -1,5 +1,8 @@
 <?php
 
+use App\Settings\EventSettings;
+use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -44,7 +47,18 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * A host date and time as the terminal writes it - DDDHHMM, day of the year in
+ * the event's timezone - for a given moment, or for now.
+ *
+ * Payment results are only recognised as ours when the host authorised them
+ * inside the attempt's window, so tests that expect a match have to speak the
+ * same clock.
+ */
+function hostDateTime(?CarbonInterface $moment = null): string
 {
-    // ..
+    $local = CarbonImmutable::parse($moment ?? now())
+        ->setTimezone(app(EventSettings::class)->timezone);
+
+    return str_pad((string) ($local->dayOfYear), 3, '0', STR_PAD_LEFT).$local->format('Hi');
 }

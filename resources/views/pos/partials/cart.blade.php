@@ -115,6 +115,16 @@
             <p class="text-sm text-red-600">{{ $message }}</p>
         @enderror
 
+        @if (! empty($cart) && $this->orderTotal === 0)
+            {{-- Nothing to take: a discount has covered the lot. Two tender
+                 buttons would both be a lie, and the cash one would kick the
+                 drawer open for no money. --}}
+            <button type="button" wire:click="startFreeOrder"
+                class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-neutral-900 py-3 font-medium text-white transition dark:bg-neutral-100 dark:text-neutral-900">
+                <x-heroicon-o-gift class="h-5 w-5" />
+                Conferma ordine
+            </button>
+        @else
         <div class="grid grid-cols-2 gap-2">
             <button type="button" wire:click="startCash" @disabled(empty($cart))
                 class="inline-flex items-center justify-center gap-2 rounded-lg bg-neutral-900 py-3 font-medium text-white transition disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900">
@@ -127,5 +137,6 @@
                 Carta
             </button>
         </div>
+        @endif
     </div>
 </aside>

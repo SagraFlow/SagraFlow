@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
@@ -61,6 +62,15 @@ class Order extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(OrderLine::class);
+    }
+
+    /**
+     * The card payment that paid for it, when it was taken on a terminal. Null
+     * for cash, and for a card taken by hand on a station with no terminal.
+     */
+    public function cardTransaction(): HasOne
+    {
+        return $this->hasOne(CardTransaction::class);
     }
 
     /**

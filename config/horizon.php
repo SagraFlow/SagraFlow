@@ -212,6 +212,23 @@ return [
             'timeout' => 60,
             'nice' => 0,
         ],
+        // Pagamenti con carta: attendono una persona al terminale, quindi hanno
+        // tempi in un altro ordine di grandezza rispetto a una stampa. Timeout
+        // del supervisore sopra quello del job e sotto il retry_after della sua
+        // connessione: un pagamento non deve mai poter ripartire da solo.
+        'payments' => [
+            'connection' => 'redis-payments',
+            'queue' => ['payments'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 180,
+            'nice' => 0,
+        ],
         // Comande, coperti, tagliandini di ritiro + la coda generica (notifiche
         // di Filament e altri job) a priorità più bassa.
         'prints' => [
@@ -233,11 +250,15 @@ return [
         'production' => [
             'receipts' => ['maxProcesses' => 4, 'balanceMaxShift' => 1, 'balanceCooldown' => 3],
             'prints' => ['maxProcesses' => 8, 'balanceMaxShift' => 1, 'balanceCooldown' => 3],
+            // One per till that can take cards, so a busy station never waits
+            // for another's customer to finish typing a PIN.
+            'payments' => ['maxProcesses' => 4, 'balanceMaxShift' => 1, 'balanceCooldown' => 3],
         ],
 
         'local' => [
             'receipts' => ['maxProcesses' => 2],
             'prints' => ['maxProcesses' => 3],
+            'payments' => ['maxProcesses' => 2],
         ],
     ],
 

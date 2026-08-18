@@ -32,6 +32,13 @@ class CashRegisterForm
                     ->validationMessages([
                         'unique' => 'Questa stampante è già la locale di un\'altra cassa.',
                     ]),
+                Select::make('card_terminal_id')
+                    ->label('Terminale POS')
+                    ->helperText('Può essere lo stesso di un\'altra cassa: chi arriva secondo aspetta che si liberi. Senza terminale, il pagamento con carta si conferma a mano.')
+                    ->relationship('cardTerminal', 'name')
+                    ->searchable()
+                    ->preload()
+                    ->placeholder('Nessuno'),
             ]);
     }
 }

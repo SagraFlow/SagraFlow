@@ -18,6 +18,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('print:reconcile')->everyMinute()->withoutOverlapping();
         // Free stock held by checkouts that never confirmed nor cancelled.
         $schedule->command('stock:release-reservations')->everyMinute()->withoutOverlapping();
+        // Ask the terminals about payments left without an answer, while they
+        // can still answer: their memory holds one transaction, and a station
+        // that takes the terminal next overwrites it.
+        $schedule->command('card:reconcile')->everyMinute()->withoutOverlapping();
         // Populate the Horizon metrics dashboard.
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
     })
