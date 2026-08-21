@@ -27,9 +27,7 @@ class PrinterQueue
             ->orderBy('id')
             ->get();
 
-        foreach ($jobs as $job) {
-            SendToPrinterJob::dispatchFor($job);
-        }
+        SendToPrinterJob::dispatchForAll($jobs);
 
         return $jobs->count();
     }

@@ -30,6 +30,9 @@ class ReconcilePrintJobs extends Command
             ->orderBy('id')
             ->get();
 
+        /** @var array<int, PrintJob> $recovered */
+        $recovered = [];
+
         foreach ($jobs as $job) {
             $printer = $job->printer;
 
@@ -51,8 +54,12 @@ class ReconcilePrintJobs extends Command
                 continue;
             }
 
-            SendToPrinterJob::dispatchFor($job);
+            $recovered[] = $job;
         }
+
+        // Grouped per printer, in the order they were created: one connection
+        // catches up on everything a printer owes.
+        SendToPrinterJob::dispatchForAll($recovered);
 
         return self::SUCCESS;
     }

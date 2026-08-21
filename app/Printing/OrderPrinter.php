@@ -20,6 +20,9 @@ class OrderPrinter
     {
         $order->loadMissing(['lines.ingredients', 'lines.food.category.printRoutes', 'cashRegister.printer']);
 
+        /** @var array<int, PrintJob> $queued */
+        $queued = [];
+
         foreach ($this->router->tasks($order) as $task) {
             $hasPrinter = $task->printer !== null;
 
@@ -38,8 +41,13 @@ class OrderPrinter
             ]);
 
             if ($hasPrinter) {
-                SendToPrinterJob::dispatchFor($printJob);
+                $queued[] = $printJob;
             }
         }
+
+        // One send per printer, carrying that printer's documents in order: the
+        // receipt and the pickup stubs that follow it are printed back to back
+        // instead of each queueing behind the previous one.
+        SendToPrinterJob::dispatchForAll($queued);
     }
 }
