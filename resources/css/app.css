@@ -42,6 +42,38 @@
 }
 
 /*
+ * How a focused field looks is decided here rather than left to the browser: the
+ * user-agent ring takes its colour from the operating system's accent, so the
+ * same note field came out ochre on one mac and would come out blue on the next
+ * tablet. One neutral ring instead, the same everywhere.
+ *
+ * The ring is drawn inside the field (negative offset), not around it: a field
+ * is full width inside a dialog body or a cart column that scrolls, and a
+ * scrolling box clips on both axes, so a ring sitting outside the border came
+ * out cut off at the left and right edges. Inside, it cannot be clipped by
+ * anything, and the field's own hairline border stays as the outer edge, so
+ * nothing moves when a field takes focus.
+ *
+ * It is styled, never removed: the till is worked with a finger, but the admin
+ * panel behind it is worked with a keyboard, and a focus nobody can see is a
+ * form nobody can fill.
+ */
+@layer base {
+    input:focus-visible,
+    textarea:focus-visible,
+    select:focus-visible {
+        outline: 2px solid var(--color-neutral-900);
+        outline-offset: -1px;
+    }
+
+    :where(.dark) input:focus-visible,
+    :where(.dark) textarea:focus-visible,
+    :where(.dark) select:focus-visible {
+        outline-color: var(--color-neutral-100);
+    }
+}
+
+/*
  * Printer trouble badge on the till. One single slow breathing, from the moment
  * it appears until the problem is fixed: the cashier is often looking away
  * (giving change, talking to the customer), so a signal that stops after a few
