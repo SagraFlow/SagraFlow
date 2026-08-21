@@ -145,6 +145,10 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public bool $showClearCart = false;
 
+    /** Cart line whose removal is waiting to be confirmed. */
+    #[Locked]
+    public ?string $removingKey = null;
+
     public bool $showSoldOut = false;
 
     public bool $showReservationExpired = false;
@@ -1270,15 +1274,51 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $this->cart = $cart;
     }
 
+    /**
+     * Takes one portion off the line, and asks before the last one: a row that
+     * vanishes under a finger still pressing lets the next press land on the row
+     * that has slid up in its place, which is how a second line used to lose a
+     * portion nobody touched. The confirmation stops the run and leaves the
+     * quantity at 1 if the answer is no.
+     */
     public function decrementLine(string $key): void
     {
         if ($this->paymentInProgress() || ! isset($this->cart[$key])) {
             return;
         }
 
-        if (--$this->cart[$key]['quantity'] < 1) {
-            unset($this->cart[$key]);
+        if ($this->cart[$key]['quantity'] <= 1) {
+            $this->removingKey = $key;
+
+            return;
         }
+
+        $this->cart[$key]['quantity']--;
+    }
+
+    /**
+     * The cart line whose removal is being confirmed, if any.
+     *
+     * @return array<string, mixed>|null
+     */
+    #[Computed]
+    public function removingLine(): ?array
+    {
+        return $this->removingKey !== null ? ($this->cart[$this->removingKey] ?? null) : null;
+    }
+
+    public function cancelRemoveLine(): void
+    {
+        $this->removingKey = null;
+    }
+
+    public function confirmRemoveLine(): void
+    {
+        if ($this->removingKey !== null && ! $this->paymentInProgress()) {
+            unset($this->cart[$this->removingKey]);
+        }
+
+        $this->removingKey = null;
     }
 
     public function openClearCart(): void
@@ -1303,7 +1343,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function clearCart(): void
     {
         $this->releaseReservation();
-        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart');
+        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart', 'removingKey');
     }
 
     public function openDiscount(): void
@@ -1853,7 +1893,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         unset($this->cardTransaction);
 
         $this->placedOrderNumber = $order->number;
-        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'showFreeOrder', 'cashReceivedCents', 'cashInput', 'reservationId', 'cardTransactionId', 'terminalBusyWith', 'terminalFreeAgain', 'unresolvedPayment', 'unresolvedAcknowledged', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
+        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'removingKey', 'showDiscount', 'showCashModal', 'showCardModal', 'showFreeOrder', 'cashReceivedCents', 'cashInput', 'reservationId', 'cardTransactionId', 'terminalBusyWith', 'terminalFreeAgain', 'unresolvedPayment', 'unresolvedAcknowledged', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
     }
 
     public function newOrder(): void

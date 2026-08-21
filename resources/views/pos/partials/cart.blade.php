@@ -80,7 +80,21 @@
                     <div class="flex items-center gap-3">
                         <button type="button" wire:click="editLine('{{ $key }}')" title="Modifica" class="flex h-11 w-11 items-center justify-center rounded-md border border-neutral-300 text-neutral-600 transition dark:border-neutral-700 dark:text-neutral-300"><x-heroicon-o-pencil-square class="h-5 w-5" /></button>
                         <div class="flex items-center gap-1">
-                            <button type="button" wire:click="decrementLine('{{ $key }}')" class="flex h-11 w-11 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-minus class="h-5 w-5" /></button>
+                            {{-- On the last portion the minus turns into a bin:
+                                 the press that would empty the line says so
+                                 before it is made, and it asks. No fourth target
+                                 on a row that has no room for one. --}}
+                            <button type="button" wire:click="decrementLine('{{ $key }}')"
+                                @class([
+                                    'flex h-11 w-11 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800',
+                                    'text-red-600 dark:text-red-500' => $line['quantity'] <= 1,
+                                ])>
+                                @if ($line['quantity'] <= 1)
+                                    <x-heroicon-m-trash class="h-5 w-5" />
+                                @else
+                                    <x-heroicon-m-minus class="h-5 w-5" />
+                                @endif
+                            </button>
                             <span class="w-8 text-center text-lg tabular-nums">{{ $line['quantity'] }}</span>
                             <button type="button" wire:click="incrementLine('{{ $key }}')" class="flex h-11 w-11 items-center justify-center rounded-md bg-neutral-200 dark:bg-neutral-800"><x-heroicon-m-plus class="h-5 w-5" /></button>
                         </div>

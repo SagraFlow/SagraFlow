@@ -76,25 +76,83 @@ it('adds foods to the cart and totals them', function () {
         ->assertSee('€ 10,00');
 });
 
-it('decrements and removes a cart line', function () {
+/**
+ * A till holding one line of the given quantity, with its cart key.
+ *
+ * @return array{0: object, 1: string}
+ */
+function tillWithLine(int $quantity = 1): array
+{
     openDay();
     $register = CashRegister::factory()->create();
     $category = Category::factory()->create();
-    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+    $food = Food::factory()->create(['category_id' => $category->id, 'name' => 'Polenta Taragna', 'price' => 500]);
 
-    $component = Livewire::test('pages::pos')
-        ->call('selectRegister', $register->id)
-        ->call('addFood', $food->id)
-        ->call('addFood', $food->id);
+    $component = Livewire::test('pages::pos')->call('selectRegister', $register->id);
 
-    $key = array_key_first($component->get('cart'));
+    foreach (range(1, $quantity) as $ignored) {
+        $component->call('addFood', $food->id);
+    }
+
+    return [$component, array_key_first($component->get('cart'))];
+}
+
+it('decrements a cart line down to its last portion', function () {
+    [$component, $key] = tillWithLine(2);
+
     expect($component->get('cart')[$key]['quantity'])->toBe(2);
 
     $component->call('decrementLine', $key);
-    expect($component->get('cart')[$key]['quantity'])->toBe(1);
 
-    $component->call('decrementLine', $key);
+    expect($component->get('cart')[$key]['quantity'])->toBe(1);
+});
+
+it('asks before the last portion instead of dropping the line under the finger', function () {
+    [$component, $key] = tillWithLine();
+
+    $component->call('decrementLine', $key)
+        ->assertSet('removingKey', $key)
+        ->assertSee('Rimuovere la riga?')
+        ->assertSee('Polenta Taragna');
+
+    // The line is still there, whole, until the answer comes.
+    expect($component->get('cart')[$key]['quantity'])->toBe(1);
+});
+
+it('keeps the line at one portion when the removal is refused', function () {
+    [$component, $key] = tillWithLine();
+
+    $component->call('decrementLine', $key)
+        ->call('cancelRemoveLine')
+        ->assertSet('removingKey', null);
+
+    expect($component->get('cart')[$key]['quantity'])->toBe(1);
+});
+
+it('removes the line once the removal is confirmed', function () {
+    [$component, $key] = tillWithLine();
+
+    $component->call('decrementLine', $key)
+        ->call('confirmRemoveLine')
+        ->assertSet('removingKey', null);
+
     expect($component->get('cart'))->toBeEmpty();
+});
+
+it('leaves the other lines alone while a removal is being confirmed', function () {
+    [$component, $key] = tillWithLine();
+    $second = Food::factory()->create(['category_id' => Category::factory()->create()->id, 'price' => 700]);
+
+    $component->call('addFood', $second->id)->call('decrementLine', $key);
+
+    // The presses that used to land on the row sliding up now land on nothing:
+    // the confirmation holds the list still.
+    $component->call('confirmRemoveLine');
+
+    $cart = $component->get('cart');
+
+    expect($cart)->toHaveCount(1)
+        ->and(collect($cart)->first()['quantity'])->toBe(1);
 });
 
 it('adds a product directly to the cart without prompting for customizations', function () {
@@ -1245,6 +1303,7 @@ it('freezes the cart while a payment is in progress', function () {
     expect($component->get('cart'))->toHaveCount(1)
         ->and(collect($component->get('cart'))->first()['quantity'])->toBe(1)
         ->and($component->get('editingKey'))->toBeNull()
+        ->and($component->get('removingKey'))->toBeNull()
         ->and($component->get('showClearCart'))->toBeFalse();
 });
 
