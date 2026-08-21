@@ -15,6 +15,15 @@
                     class="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
             @endif
 
+            {{-- The volunteers eat every evening and their meals go through the
+                 till like any other order: a whole discount is a preset, not
+                 four keystrokes. Applies and closes like Applica, and the sale
+                 then takes the usual route for an order that costs nothing. --}}
+            <button type="button" wire:click="applyFullDiscount"
+                class="mt-4 h-14 w-full rounded-lg border-2 border-neutral-900 text-base font-semibold dark:border-neutral-100">
+                Omaggio - Sconto 100%
+            </button>
+
             <div class="mt-4 rounded-lg bg-neutral-100 p-3 text-sm dark:bg-neutral-800">
                 <div class="flex justify-between"><span>Subtotale</span><span class="tabular-nums">{{ $this->money($this->cartTotal) }}</span></div>
                 <div class="flex justify-between text-neutral-500"><span>Sconto</span><span class="tabular-nums">- {{ $this->money($this->discountAmount) }}</span></div>

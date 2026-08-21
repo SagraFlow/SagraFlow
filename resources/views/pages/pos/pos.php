@@ -1418,6 +1418,20 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     }
 
     /**
+     * A meal given away, in one press: the volunteers eat every evening and
+     * their orders go through the till like everybody else's, so a full discount
+     * is a preset rather than something to type. It closes the dialog as Applica
+     * does, and the sale then takes the till's usual route for an order that
+     * costs nothing - one button, and a confirmation before it leaves.
+     */
+    public function applyFullDiscount(): void
+    {
+        $this->discountType = DiscountType::Percentage->value;
+        $this->discountValue = '100';
+        $this->showDiscount = false;
+    }
+
+    /**
      * Reason the sale cannot be checked out right now, or null when it can.
      * Guards against state that changed after the cart was started (the day
      * being closed, the selected register being deactivated).

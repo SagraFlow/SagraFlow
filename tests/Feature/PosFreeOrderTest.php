@@ -34,6 +34,46 @@ function fullyDiscountedTill(): object
         ->call('applyDiscount');
 }
 
+it('gives the whole order away from one key in the discount dialog', function () {
+    $register = CashRegister::factory()->create();
+    $food = Food::factory()->create(['category_id' => Category::factory()->create()->id, 'price' => 1250]);
+
+    $component = Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('choosePickup')
+        ->call('openDiscount')
+        ->assertSee('Omaggio - Sconto 100%')
+        ->call('applyFullDiscount')
+        ->assertSet('discountType', 'percentage')
+        ->assertSet('discountValue', '100')
+        ->assertSet('showDiscount', false);
+
+    // Straight onto the route for an order that costs nothing.
+    expect($component->instance()->orderTotal)->toBe(0);
+
+    $component->call('startFreeOrder')
+        ->call('confirmFreeOrder')
+        ->assertHasNoErrors();
+
+    expect(Order::sole()->total)->toBe(0)
+        ->and(Order::sole()->payment_method)->toBe(PaymentMethod::None);
+});
+
+it('leaves the given-away discount behind when the dialog is reopened and cancelled', function () {
+    $component = fullyDiscountedTill();
+
+    // Cancelling restores what was there when the dialog opened, so the key is
+    // as undoable as anything typed by hand.
+    $component->call('openDiscount')
+        ->call('applyFullDiscount')
+        ->call('openDiscount')
+        ->call('$set', 'discountType', null)
+        ->call('cancelDiscount')
+        ->assertSet('discountType', 'percentage')
+        ->assertSet('discountValue', '100');
+});
+
 it('offers one button to confirm when there is nothing to take', function () {
     $component = fullyDiscountedTill();
 
