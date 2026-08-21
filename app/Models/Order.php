@@ -126,7 +126,9 @@ class Order extends Model
             throw new OrderException('Un ordine deve contenere almeno una pietanza.');
         }
 
-        if ($serviceType === ServiceType::TableService && ($tableNumber === null || $tableNumber < 1)) {
+        // A hall is free to number a table 0; what table service cannot have is
+        // no number at all, or a negative one.
+        if ($serviceType === ServiceType::TableService && ($tableNumber === null || $tableNumber < 0)) {
             throw new OrderException('Numero tavolo non valido.');
         }
 

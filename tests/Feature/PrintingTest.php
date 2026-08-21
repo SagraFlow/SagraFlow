@@ -288,6 +288,16 @@ it('prints a Ritiro banner on a table-less comanda instead of a table box', func
     expect($data)->toContain('Ritiro')->not->toContain('Tavolo');
 });
 
+it('prints the table box for a table numbered zero, not the Ritiro banner', function () {
+    $order = Order::factory()->create(['table_number' => 0, 'number' => 7]);
+
+    $data = (new DepartmentTicket($order, [
+        ['name' => 'Panino', 'quantity' => 1, 'deviation' => '', 'note' => null],
+    ]))->render();
+
+    expect($data)->toContain('Tavolo')->toContain('0')->not->toContain('Ritiro');
+});
+
 it('does not start the receipt with a blank gap when it has no header', function () {
     ['order' => $order] = orderWithRoute();
     $order->load('lines');

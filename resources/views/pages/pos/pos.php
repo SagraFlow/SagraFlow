@@ -110,12 +110,17 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public ?string $customerName = null;
 
     /**
-     * Null while the cashier has the field emptied to retype it: a
-     * non-nullable int would leave the property uninitialized, and writing a 0
-     * back straight away would fight the typing. Counts as no covers
-     * everywhere, and becomes a real 0 when the field is left.
+     * How many people the order is laid for, or null while the cashier has yet
+     * to say. No covers is a number like any other: it is pressed, not left
+     * blank, so a forgotten coperto cannot ride out on a paid order.
      */
-    public ?int $covers = 0;
+    #[Locked]
+    public ?int $covers = null;
+
+    public bool $showCovers = false;
+
+    /** Digits pressed on the keypad, before they are confirmed as the covers. */
+    public string $coversInput = '';
 
     /** Per-cover charge (coperto) frozen when the sale started, in cents. */
     #[Locked]
@@ -943,7 +948,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     #[Computed]
     public function coverTotal(): int
     {
-        return $this->covers * $this->coverCharge;
+        return ($this->covers ?? 0) * $this->coverCharge;
     }
 
     #[Computed]
@@ -1034,9 +1039,17 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public function pressTableDigit(int $digit): void
     {
-        // Four digits is what the column holds, and a leading zero would build a
-        // table 0 that does not exist in any hall.
-        if (strlen($this->tableInput) >= 4 || ($this->tableInput === '' && $digit === 0)) {
+        // A hall can number a table 0, so it is typed like any other number -
+        // but only as the whole number: the next digit takes its place rather
+        // than building an 04.
+        if ($this->tableInput === '0') {
+            $this->tableInput = (string) $digit;
+
+            return;
+        }
+
+        // Four digits is what the column holds.
+        if (strlen($this->tableInput) >= 4) {
             return;
         }
 
@@ -1054,58 +1067,106 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     }
 
     /**
-     * Takes the typed number as the sale's table.
+     * Takes the typed number as the sale's table, zero included. An empty keypad
+     * is no answer at all and confirms nothing.
      */
     public function chooseTable(): void
     {
-        $number = (int) $this->tableInput;
-
-        if ($number < 1) {
+        if ($this->tableInput === '') {
             return;
         }
 
         $this->serviceType = ServiceType::TableService->value;
-        $this->tableNumber = $number;
+        $this->tableNumber = (int) $this->tableInput;
         $this->showService = false;
+
+        // A table has just been laid: how many people sit at it is the next thing
+        // to say, so the keypad for it opens by itself. Correcting a table
+        // number later leaves the covers alone - they are already chosen.
+        if ($this->covers === null) {
+            $this->openCovers();
+        }
     }
 
     /**
-     * Takes the sale as a pickup: no table, and the documents say Ritiro.
+     * Takes the sale as a pickup: no table, and the documents say Ritiro. There
+     * is no table to lay either, so the covers are settled at nobody with it -
+     * a choice made, not a blank, and one the cashier can still change.
      */
     public function choosePickup(): void
     {
         $this->serviceType = ServiceType::Pickup->value;
         $this->tableNumber = null;
         $this->tableInput = '';
+        $this->covers = 0;
+        $this->coversInput = '';
         $this->showService = false;
     }
 
-    public function updatedCovers(): void
+    /**
+     * The covers as they read on the button that opens them.
+     */
+    #[Computed]
+    public function coversLabel(): string
     {
-        if ($this->covers === null) {
+        return $this->covers === null ? 'Da scegliere' : (string) $this->covers;
+    }
+
+    public function openCovers(): void
+    {
+        // Whatever was chosen is offered back for correction, zero included: it
+        // is a number like the others, and the next digit pressed replaces it.
+        $this->coversInput = $this->covers !== null ? (string) $this->covers : '';
+        $this->showCovers = true;
+    }
+
+    public function closeCovers(): void
+    {
+        $this->showCovers = false;
+    }
+
+    public function pressCoversDigit(int $digit): void
+    {
+        // Zero is a real answer to "how many", so it is typed like any other
+        // number - but only as the whole answer: the next digit takes its place
+        // rather than building an 04.
+        if ($this->coversInput === '0') {
+            $this->coversInput = (string) $digit;
+
             return;
         }
 
-        $this->covers = max(0, min(999, $this->covers));
+        // Three digits is more people than any hall seats.
+        if (strlen($this->coversInput) >= 3) {
+            return;
+        }
+
+        $this->coversInput .= $digit;
+    }
+
+    public function backspaceCovers(): void
+    {
+        $this->coversInput = substr($this->coversInput, 0, -1);
+    }
+
+    public function clearCovers(): void
+    {
+        $this->coversInput = '';
     }
 
     /**
-     * Called when the field is left: an empty box is only a step in typing, so
-     * it settles on the 0 it already counted as.
+     * Takes the typed number as the sale's covers, zero included: an order laid
+     * for nobody is answered with a 0, not with a key of its own. An empty
+     * keypad is no answer at all and confirms nothing.
      */
-    public function normalizeCovers(): void
+    public function chooseCovers(): void
     {
-        $this->covers ??= 0;
-    }
+        if ($this->coversInput === '') {
+            return;
+        }
 
-    public function incCovers(): void
-    {
-        $this->covers = min(999, (int) $this->covers + 1);
-    }
-
-    public function decCovers(): void
-    {
-        $this->covers = max(0, (int) $this->covers - 1);
+        $this->covers = (int) $this->coversInput;
+        $this->showCovers = false;
     }
 
     /**
@@ -1321,13 +1382,31 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $this->removingKey = null;
     }
 
+    /**
+     * Whether the till holds anything belonging to a customer: lines, or the
+     * details taken before them. A table chosen for somebody who then walked
+     * away stays on the till, and a chosen value raises no warning because it
+     * is a choice - so the next order would leave for the wrong table with
+     * nothing on screen to say so. Hence the reset is offered for the details
+     * alone, not only for a cart with lines in it.
+     */
+    #[Computed]
+    public function orderStarted(): bool
+    {
+        return $this->cart !== []
+            || $this->serviceType !== null
+            || $this->covers !== null
+            || $this->discountType !== null
+            || trim((string) $this->customerName) !== '';
+    }
+
     public function openClearCart(): void
     {
         if ($this->paymentInProgress()) {
             return;
         }
 
-        if ($this->cart !== []) {
+        if ($this->orderStarted) {
             $this->showClearCart = true;
         }
     }
@@ -1343,7 +1422,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function clearCart(): void
     {
         $this->releaseReservation();
-        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart', 'removingKey');
+        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'coversInput', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart', 'removingKey');
     }
 
     public function openDiscount(): void
@@ -1384,23 +1463,33 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return 'Scegli il tavolo o il ritiro prima di incassare.';
         }
 
+        if ($this->covers === null) {
+            return 'Scegli i coperti prima di incassare.';
+        }
+
         return null;
     }
 
     /**
-     * Guards a payment against a sale nobody has said where to send. Rather than
-     * report the missing step, it opens it: the cashier lands on the keypad, and
-     * the caller stops.
+     * Guards a payment against a sale nobody has said where to send, or for how
+     * many. Rather than report the missing step, it opens it: the cashier lands
+     * on the keypad that is still empty, and the caller stops.
      */
-    protected function requireServiceChoice(): bool
+    protected function requireOrderDetails(): bool
     {
-        if ($this->serviceType !== null) {
-            return true;
+        if ($this->serviceType === null) {
+            $this->openService();
+
+            return false;
         }
 
-        $this->openService();
+        if ($this->covers === null) {
+            $this->openCovers();
 
-        return false;
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -1414,7 +1503,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
-        if (! $this->requireServiceChoice()) {
+        if (! $this->requireOrderDetails()) {
             return;
         }
 
@@ -1458,7 +1547,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
-        if (! $this->requireServiceChoice()) {
+        if (! $this->requireOrderDetails()) {
             return;
         }
 
@@ -1544,7 +1633,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
-        if (! $this->requireServiceChoice()) {
+        if (! $this->requireOrderDetails()) {
             return;
         }
 
@@ -1893,7 +1982,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         unset($this->cardTransaction);
 
         $this->placedOrderNumber = $order->number;
-        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'removingKey', 'showDiscount', 'showCashModal', 'showCardModal', 'showFreeOrder', 'cashReceivedCents', 'cashInput', 'reservationId', 'cardTransactionId', 'terminalBusyWith', 'terminalFreeAgain', 'unresolvedPayment', 'unresolvedAcknowledged', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
+        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'coversInput', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'removingKey', 'showDiscount', 'showCashModal', 'showCardModal', 'showFreeOrder', 'cashReceivedCents', 'cashInput', 'reservationId', 'cardTransactionId', 'terminalBusyWith', 'terminalFreeAgain', 'unresolvedPayment', 'unresolvedAcknowledged', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
     }
 
     public function newOrder(): void

@@ -190,6 +190,16 @@ it('refuses table service without a table number', function () {
     Order::place($day, null, null, ServiceType::TableService, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
 })->throws(OrderException::class, 'Numero tavolo non valido.');
 
+it('accepts a table numbered zero, which some halls do use', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina();
+
+    $order = Order::place($day, null, null, ServiceType::TableService, 0, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+
+    expect($order->service_type)->toBe(ServiceType::TableService)
+        ->and($order->table_number)->toBe(0);
+});
+
 it('refuses a pickup carrying a table number', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();

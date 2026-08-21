@@ -6,14 +6,12 @@
             <input type="text" wire:model="customerName" maxlength="255" placeholder="Mario Rossi"
                 class="h-11 w-full rounded-lg border border-neutral-300 px-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
         </div>
-        {{-- The stepper is sized by what it holds, not by a share of the row:
-             two 44px buttons plus a box where three digits sit with air around
-             them, the same on a 10" and on a wide screen. The service choice
-             takes whatever is left. --}}
-        <div class="flex gap-3">
-            {{-- Table and pickup are one choice, and it has to be made: the
-                 button leads to the keypad and stays marked until it is. --}}
-            <div class="min-w-0 flex-1">
+        {{-- Two choices of the same kind, so two buttons of the same size, each
+             leading to its keypad. Both stay marked while they are still to be
+             made, and neither lets the order be paid until it is: a coperto
+             nobody thought about is money the sagra does not take. --}}
+        <div class="grid grid-cols-2 gap-3">
+            <div class="min-w-0">
                 <label class="mb-1 block text-sm text-neutral-500">Tavolo o ritiro</label>
                 <button type="button" wire:click="openService"
                     @class([
@@ -25,21 +23,27 @@
                     <x-heroicon-m-pencil-square class="h-5 w-5 shrink-0 text-neutral-400" />
                 </button>
             </div>
-            <div class="w-36 shrink-0">
+            <div class="min-w-0">
                 <label class="mb-1 block text-sm text-neutral-500">Coperti</label>
-                <div class="flex h-11 items-stretch overflow-hidden rounded-lg border border-neutral-300 dark:border-neutral-700">
-                    <button type="button" wire:click="decCovers" class="flex w-11 shrink-0 items-center justify-center border-r border-neutral-300 dark:border-neutral-700"><x-heroicon-m-minus class="h-5 w-5" /></button>
-                    <input type="number" min="0" max="999" wire:model.live="covers" wire:blur="normalizeCovers"
-                        class="w-full min-w-0 border-0 bg-transparent px-1 text-center text-base tabular-nums focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none">
-                    <button type="button" wire:click="incCovers" class="flex w-11 shrink-0 items-center justify-center border-l border-neutral-300 dark:border-neutral-700"><x-heroicon-m-plus class="h-5 w-5" /></button>
-                </div>
+                <button type="button" wire:click="openCovers"
+                    @class([
+                        'flex h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 text-base font-medium',
+                        'border-neutral-300 dark:border-neutral-700' => $covers !== null,
+                        'border-amber-500 text-amber-700 dark:border-amber-500/70 dark:text-amber-400' => $covers === null,
+                    ])>
+                    <span class="truncate tabular-nums">{{ $this->coversLabel }}</span>
+                    <x-heroicon-m-pencil-square class="h-5 w-5 shrink-0 text-neutral-400" />
+                </button>
             </div>
         </div>
     </div>
 
     {{-- Cart lines --}}
     <div class="flex-1 space-y-2 overflow-y-auto overscroll-contain p-4">
-        @if (! empty($cart))
+        {{-- Shown for anything the till is holding, lines or not: a table and its
+             covers taken for a customer who never ordered must be clearable
+             without adding a dish first. --}}
+        @if ($this->orderStarted)
             {{-- Negative margins pull the row's text back onto the same edges as
                  the cards below, which the button's own padding would break. --}}
             <div class="-mx-1 flex items-center justify-between pb-1">
