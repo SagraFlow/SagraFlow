@@ -90,8 +90,10 @@ class Order extends Model
     }
 
     /**
-     * Place a paid order for the given operational day. The service type is
-     * derived from the table number: set means table service, null means pickup.
+     * Place a paid order for the given operational day. Where the order goes is
+     * told, not guessed: table service carries a table number, a pickup carries
+     * none, and anything else is refused. An order with no choice behind it
+     * cannot be placed at all.
      *
      * Line prices, names, surcharges and doses are frozen snapshots taken when
      * the items were added to the cart: they are persisted verbatim, never
@@ -107,6 +109,7 @@ class Order extends Model
         EventDay $day,
         ?CashRegister $register,
         ?User $operator,
+        ServiceType $serviceType,
         ?int $tableNumber,
         ?string $customerName,
         PaymentMethod $paymentMethod,
@@ -123,8 +126,12 @@ class Order extends Model
             throw new OrderException('Un ordine deve contenere almeno una pietanza.');
         }
 
-        if ($tableNumber !== null && $tableNumber < 1) {
+        if ($serviceType === ServiceType::TableService && ($tableNumber === null || $tableNumber < 1)) {
             throw new OrderException('Numero tavolo non valido.');
+        }
+
+        if ($serviceType === ServiceType::Pickup && $tableNumber !== null) {
+            throw new OrderException('Un ordine da ritiro non ha un numero tavolo.');
         }
 
         if ($discountType === DiscountType::Percentage && ($discountValue < 0 || $discountValue > 100)) {
@@ -143,7 +150,7 @@ class Order extends Model
         for ($attempt = 0; $attempt < 5; $attempt++) {
             try {
                 return DB::transaction(fn (): self => static::build(
-                    $day, $register, $operator, $tableNumber, $customerName, $covers, $coverCharge, $paymentMethod, $items, $discountType, $discountValue, $discountAppliesToCover, $cashReceived, $consumeStock,
+                    $day, $register, $operator, $serviceType, $tableNumber, $customerName, $covers, $coverCharge, $paymentMethod, $items, $discountType, $discountValue, $discountAppliesToCover, $cashReceived, $consumeStock,
                 ));
             } catch (UniqueConstraintViolationException) {
                 continue;
@@ -168,6 +175,7 @@ class Order extends Model
         EventDay $day,
         ?CashRegister $register,
         ?User $operator,
+        ServiceType $serviceType,
         ?int $tableNumber,
         ?string $customerName,
         ?int $covers,
@@ -189,7 +197,7 @@ class Order extends Model
             'customer_name' => $customerName,
             'covers' => $covers,
             'cover_charge' => $coverCharge,
-            'service_type' => $tableNumber !== null ? ServiceType::TableService : ServiceType::Pickup,
+            'service_type' => $serviceType,
             'status' => OrderStatus::Paid,
             'payment_method' => $paymentMethod,
             'subtotal' => 0,

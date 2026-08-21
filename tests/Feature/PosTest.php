@@ -131,6 +131,7 @@ it('edits a cart line to add the extra surcharge', function () {
         ->call('incIngredient', $salamina->id)
         ->call('confirmCustomize')
         ->assertSee('€ 6,00')
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -160,6 +161,7 @@ it('does not let an ingredient exceed its max when editing', function () {
         ->call('incIngredient', $salamina->id)
         ->call('incIngredient', $salamina->id)
         ->call('confirmCustomize')
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash');
@@ -222,7 +224,8 @@ it('records the number of covers on the order', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableNumber', 3)
+        ->set('tableInput', '3')
+        ->call('chooseTable')
         ->call('incCovers')
         ->call('incCovers')
         ->call('incCovers')
@@ -248,7 +251,8 @@ it('adds the cover charge to the order total', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableNumber', 3)
+        ->set('tableInput', '3')
+        ->call('chooseTable')
         ->call('incCovers')
         ->call('incCovers')
         ->assertSee('Coperti')
@@ -279,7 +283,8 @@ it('discounts the cover charge when the setting is enabled', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableNumber', 1)
+        ->set('tableInput', '1')
+        ->call('chooseTable')
         ->call('incCovers') // 1 cover → 2,00 coperto
         ->set('discountType', 'percentage')
         ->set('discountValue', 10)
@@ -306,6 +311,7 @@ it('does not add a cover charge when none is configured', function () {
         ->call('addFood', $food->id)
         ->call('incCovers')
         ->assertDontSee('Coperti (')
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -327,6 +333,7 @@ it('charges the price frozen when the item was added, not the current one', func
     // Admin reprices the food mid-sale.
     $food->update(['price' => 900]);
 
+    $component->call('choosePickup');
     $component->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -351,7 +358,8 @@ it('freezes the cover charge from when the sale started', function () {
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id) // freezes coperto at 1,00
-        ->set('tableNumber', 1)
+        ->set('tableInput', '1')
+        ->call('chooseTable')
         ->call('incCovers');
 
     // Admin changes the coperto mid-sale.
@@ -383,7 +391,8 @@ it('freezes the discount-on-cover choice from when the sale started', function (
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id) // freezes flag = true, coperto 2,00
-        ->set('tableNumber', 1)
+        ->set('tableInput', '1')
+        ->call('chooseTable')
         ->call('incCovers')
         ->set('discountType', 'percentage')
         ->set('discountValue', 10);
@@ -416,6 +425,7 @@ it('blocks checkout when the day has been closed mid-sale', function () {
 
     $day->close(auth()->user());
 
+    $component->call('choosePickup');
     $component->call('startCash')
         ->assertHasErrors('checkout')
         ->assertSet('showCashModal', false);
@@ -435,6 +445,7 @@ it('blocks checkout when the selected register was deactivated mid-sale', functi
 
     $register->update(['active' => false]);
 
+    $component->call('choosePickup');
     $component->call('startCard')
         ->assertHasErrors('checkout')
         ->assertSet('showCardModal', false);
@@ -463,12 +474,14 @@ it('clears the cart and the order details', function () {
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableNumber', 5)
+        ->set('tableInput', '5')
+        ->call('chooseTable')
         ->call('openClearCart')
         ->assertSet('showClearCart', true)
         ->call('clearCart');
 
     expect($component->get('cart'))->toBeEmpty()
+        ->and($component->get('serviceType'))->toBeNull()
         ->and($component->get('tableNumber'))->toBeNull();
 
     $component->assertSet('showClearCart', false);
@@ -511,6 +524,7 @@ it('records a per-line note from the modal', function () {
     $component->call('editLine', $key)
         ->set('customizeNote', 'senza glutine')
         ->call('confirmCustomize')
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -542,7 +556,8 @@ it('places a table order from checkout and confirms with the number', function (
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
         ->call('addFood', $food->id)
-        ->set('tableNumber', 7)
+        ->set('tableInput', '7')
+        ->call('chooseTable')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -560,7 +575,7 @@ it('places a table order from checkout and confirms with the number', function (
         ->and($order->lines)->toHaveCount(1);
 });
 
-it('places a pickup order when no table number is set', function () {
+it('places a pickup order when the pickup key is pressed', function () {
     openDay();
     $register = CashRegister::factory()->create();
     $category = Category::factory()->create();
@@ -569,11 +584,143 @@ it('places a pickup order when no table number is set', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard')
         ->call('confirmCard')
         ->assertHasNoErrors();
 
-    expect(Order::first()->service_type)->toBe(ServiceType::Pickup);
+    expect(Order::first()->service_type)->toBe(ServiceType::Pickup)
+        ->and(Order::first()->table_number)->toBeNull();
+});
+
+/**
+ * A till with one item in the cart and no service choice made yet.
+ */
+function tillAwaitingServiceChoice(): object
+{
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    return Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id);
+}
+
+it('opens the choice instead of taking money when nobody said where the order goes', function (string $payment) {
+    tillAwaitingServiceChoice()
+        ->call($payment)
+        ->assertSet('showService', true)
+        ->assertSet('showCashModal', false)
+        ->assertSet('showCardModal', false)
+        ->assertSet('reservationId', null);
+
+    expect(Order::count())->toBe(0);
+})->with(['startCash', 'startCard']);
+
+it('opens the choice instead of confirming a giveaway with no destination', function () {
+    tillAwaitingServiceChoice()
+        ->set('discountType', 'percentage')
+        ->set('discountValue', '100')
+        ->call('applyDiscount')
+        ->call('startFreeOrder')
+        ->assertSet('showService', true)
+        ->assertSet('showFreeOrder', false);
+
+    expect(Order::count())->toBe(0);
+});
+
+it('refuses to place the order even if the payment is forced through without a choice', function () {
+    // Straight to the confirmation, skipping the screen that opens the choice.
+    tillAwaitingServiceChoice()
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasErrors('checkout');
+
+    expect(Order::count())->toBe(0);
+});
+
+it('builds the table number one key at a time', function () {
+    tillAwaitingServiceChoice()
+        ->call('openService')
+        ->call('pressTableDigit', 0)   // a table 0 does not exist: ignored
+        ->call('pressTableDigit', 1)
+        ->call('pressTableDigit', 0)   // but a zero after a digit is a ten
+        ->call('pressTableDigit', 4)
+        ->assertSet('tableInput', '104')
+        ->call('backspaceTable')
+        ->assertSet('tableInput', '10')
+        ->call('clearTable')
+        ->assertSet('tableInput', '');
+});
+
+it('stops the table number at four digits, which is what the field holds', function () {
+    tillAwaitingServiceChoice()
+        ->call('openService')
+        ->call('pressTableDigit', 1)
+        ->call('pressTableDigit', 2)
+        ->call('pressTableDigit', 3)
+        ->call('pressTableDigit', 4)
+        ->call('pressTableDigit', 5)
+        ->assertSet('tableInput', '1234');
+});
+
+it('takes the typed number as the table, and needs a number to take', function () {
+    $component = tillAwaitingServiceChoice()
+        ->call('openService')
+        ->call('chooseTable')          // nothing typed: nothing chosen
+        ->assertSet('showService', true)
+        ->assertSet('serviceType', null)
+        ->set('tableInput', '12')
+        ->call('chooseTable')
+        ->assertSet('showService', false)
+        ->assertSet('serviceType', 'table_service')
+        ->assertSet('tableNumber', 12);
+
+    $component->assertSee('Tavolo 12');
+});
+
+it('drops the table when the order becomes a pickup', function () {
+    tillAwaitingServiceChoice()
+        ->set('tableInput', '12')
+        ->call('chooseTable')
+        ->call('choosePickup')
+        ->assertSet('serviceType', 'pickup')
+        ->assertSet('tableNumber', null)
+        ->assertSee('Ritiro');
+});
+
+it('offers the chosen table back for correction, and starts empty on a pickup', function () {
+    $component = tillAwaitingServiceChoice()
+        ->set('tableInput', '12')
+        ->call('chooseTable')
+        ->call('openService')
+        ->assertSet('tableInput', '12');
+
+    $component->call('choosePickup')
+        ->call('openService')
+        ->assertSet('tableInput', '');
+});
+
+it('asks again for the next order once one is placed', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->set('tableInput', '7')
+        ->call('chooseTable')
+        ->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors()
+        ->assertSet('serviceType', null)
+        ->assertSet('tableNumber', null)
+        ->assertSee('Da scegliere');
 });
 
 it('applies a fixed discount entered in euros at checkout', function () {
@@ -587,6 +734,7 @@ it('applies a fixed discount entered in euros at checkout', function () {
         ->call('addFood', $food->id)
         ->set('discountType', 'fixed')
         ->set('discountValue', 2)
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -610,6 +758,7 @@ it('applies a percentage discount at checkout', function () {
         ->call('addFood', $food->id)
         ->set('discountType', 'percentage')
         ->set('discountValue', 10)
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -627,6 +776,7 @@ it('does not confirm cash payment when the amount is insufficient', function () 
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCash')
         ->call('addCash', 500) // only 5€ for a 10€ order
         ->call('confirmCash');
@@ -643,6 +793,7 @@ it('computes the change for a cash payment', function () {
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCash')
         ->call('addCash', 2000);
 
@@ -669,6 +820,7 @@ it('does not place a second order when the payment is confirmed twice', function
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -690,6 +842,7 @@ it('cancels a card payment without creating the order', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard')
         ->call('closeCard');
 
@@ -705,6 +858,7 @@ it('falls back from card to cash payment', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard')
         ->call('cardToCash')
         ->assertSet('showCardModal', false)
@@ -818,6 +972,7 @@ it('opens the sold-out modal at checkout when an ingredient ran out after adding
     // Another register buys the last unit before this one checks out.
     $salsiccia->update(['stock' => 0]);
 
+    $component->call('choosePickup');
     $component->call('startCash')->call('setExactCash')->call('confirmCash')
         ->assertSet('showSoldOut', true)        // sold-out modal opens
         ->assertSet('showCashModal', false)     // payment modal closes
@@ -851,6 +1006,7 @@ it('lists every missing ingredient in the sold-out modal', function () {
     $pane->update(['stock' => 0]);
     $salsiccia->update(['stock' => 0]);
 
+    $component->call('choosePickup');
     $component->call('startCash')->call('setExactCash')->call('confirmCash')
         ->assertSet('showSoldOut', true)
         ->assertSee('Pane')
@@ -882,6 +1038,7 @@ it('reserves ingredient stock when the card payment starts', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard')
         ->assertSet('showCardModal', true);
 
@@ -895,6 +1052,7 @@ it('releases the reservation when the card payment is cancelled', function () {
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard');
 
     expect($ingredient->fresh()->stock)->toBe(2);
@@ -913,6 +1071,7 @@ it('does not decrement stock again when confirming a reserved payment', function
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard')
         ->call('confirmCard')
         ->assertHasNoErrors();
@@ -932,6 +1091,7 @@ it('shows sold out and never opens the card modal when the stock ran out at paym
     // Another register takes the last unit before this one starts paying.
     $ingredient->update(['stock' => 0]);
 
+    $component->call('choosePickup');
     $component->call('startCard')
         ->assertSet('showCardModal', false)   // customer is never charged
         ->assertSet('showSoldOut', true)
@@ -948,6 +1108,7 @@ it('marks a food sold out for other registers while its stock is held for a paym
     Livewire::test('pages::pos')
         ->call('selectRegister', $registerA->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard');
 
     // Register B now sees the food as sold out.
@@ -962,6 +1123,7 @@ it('keeps the single reservation when switching from card to cash', function () 
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard');
 
     $reservationId = $component->get('reservationId');
@@ -981,6 +1143,7 @@ it('keeps the reservation alive while the payment screen stays open', function (
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard');
 
     $reservationId = $component->get('reservationId');
@@ -1000,6 +1163,7 @@ it('re-acquires the hold on heartbeat when it was released mid-payment', functio
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard');
 
     $oldId = $component->get('reservationId');
@@ -1027,6 +1191,7 @@ it('stops the payment and shows sold out when the hold cannot be re-acquired', f
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard');
 
     $oldId = $component->get('reservationId');
@@ -1065,6 +1230,7 @@ it('freezes the cart while a payment is in progress', function () {
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard'); // payment in progress
 
     $key = array_key_first($component->get('cart'));
@@ -1088,6 +1254,7 @@ it('cancels the payment and warns the cashier when the hold exceeds the max hold
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCard');
 
     $reservationId = $component->get('reservationId');
@@ -1125,6 +1292,7 @@ it('gives the held stock back when the order fails after the hold was claimed', 
     $component->call('editLine', $key)
         ->set('customizeNote', str_repeat('a', 300))
         ->call('confirmCustomize')
+        ->call('choosePickup')
         ->call('startCard');
 
     expect($ingredient->fresh()->stock)->toBe(2); // held for the payment

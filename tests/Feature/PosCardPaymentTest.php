@@ -36,9 +36,12 @@ function tillWithCart(?CardTerminal $terminal = null): array
     $register = CashRegister::factory()->create(['card_terminal_id' => $terminal?->id]);
     $food = Food::factory()->create(['category_id' => Category::factory()->create()->id, 'price' => 1250]);
 
+    // A till ready to be paid: the service choice is a step of its own, and
+    // every payment is blocked until it is made.
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->call('addFood', $food->id);
+        ->call('addFood', $food->id)
+        ->call('choosePickup');
 
     return [$component, $register];
 }

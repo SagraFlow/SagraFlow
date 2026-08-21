@@ -51,6 +51,7 @@ it('opens the drawer as the cash screen opens, not when the receipt prints', fun
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCash')
         ->assertSet('showCashModal', true);
 
@@ -69,6 +70,7 @@ it('does not kick the drawer again with the receipt', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash');
@@ -83,6 +85,7 @@ it('says so when the drawer cannot be opened, and takes the payment anyway', fun
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCash')
         ->assertDispatched('pos-notice')
         ->assertSet('showCashModal', true);

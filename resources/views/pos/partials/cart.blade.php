@@ -1,5 +1,5 @@
 <aside class="flex w-1/4 min-w-80 flex-col border-l border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-    {{-- Customer, table, covers --}}
+    {{-- Customer, table or pickup, covers --}}
     <div class="space-y-3 border-b border-neutral-200 p-4 dark:border-neutral-800">
         <div>
             <label class="mb-1 block text-sm text-neutral-500">Nome Cliente</label>
@@ -8,13 +8,22 @@
         </div>
         {{-- The stepper is sized by what it holds, not by a share of the row:
              two 44px buttons plus a box where three digits sit with air around
-             them, the same on a 10" and on a wide screen. The table number
+             them, the same on a 10" and on a wide screen. The service choice
              takes whatever is left. --}}
         <div class="flex gap-3">
+            {{-- Table and pickup are one choice, and it has to be made: the
+                 button leads to the keypad and stays marked until it is. --}}
             <div class="min-w-0 flex-1">
-                <label class="mb-1 block text-sm text-neutral-500">N. Tavolo</label>
-                <input type="number" min="1" max="9999" wire:model.live="tableNumber" placeholder="12"
-                    class="h-11 w-full rounded-lg border border-neutral-300 px-3 text-base dark:border-neutral-700 dark:bg-neutral-800">
+                <label class="mb-1 block text-sm text-neutral-500">Tavolo o ritiro</label>
+                <button type="button" wire:click="openService"
+                    @class([
+                        'flex h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 text-base font-medium',
+                        'border-neutral-300 dark:border-neutral-700' => $serviceType !== null,
+                        'border-amber-500 text-amber-700 dark:border-amber-500/70 dark:text-amber-400' => $serviceType === null,
+                    ])>
+                    <span class="truncate">{{ $this->serviceLabel }}</span>
+                    <x-heroicon-m-pencil-square class="h-5 w-5 shrink-0 text-neutral-400" />
+                </button>
             </div>
             <div class="w-36 shrink-0">
                 <label class="mb-1 block text-sm text-neutral-500">Coperti</label>

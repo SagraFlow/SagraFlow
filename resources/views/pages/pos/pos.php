@@ -4,6 +4,7 @@ use App\CardPayments\PaymentRunner;
 use App\Enums\CardTransactionStatus;
 use App\Enums\DiscountType;
 use App\Enums\PaymentMethod;
+use App\Enums\ServiceType;
 use App\Exceptions\OrderException;
 use App\Exceptions\PrinterException;
 use App\Jobs\SendCardPaymentJob;
@@ -89,7 +90,22 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public ?string $customizeNote = null;
 
+    /**
+     * Where the order goes, as a ServiceType value, or null while the cashier
+     * has yet to say. Nothing infers it from the table number any more: it is a
+     * step of its own, and an order cannot be paid before it is taken.
+     */
+    #[Locked]
+    public ?string $serviceType = null;
+
+    /** The chosen table, set with the table-service choice and null on a pickup. */
+    #[Locked]
     public ?int $tableNumber = null;
+
+    public bool $showService = false;
+
+    /** Digits pressed on the keypad, before they are confirmed as the table. */
+    public string $tableInput = '';
 
     public ?string $customerName = null;
 
@@ -986,11 +1002,78 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
     }
 
-    public function updatedTableNumber(): void
+    /**
+     * The service choice as it reads on the button that opens it.
+     */
+    #[Computed]
+    public function serviceLabel(): string
     {
-        if ($this->tableNumber !== null && $this->tableNumber > 9999) {
-            $this->tableNumber = 9999;
+        return match ($this->serviceType) {
+            ServiceType::TableService->value => 'Tavolo '.$this->tableNumber,
+            ServiceType::Pickup->value => 'Ritiro',
+            default => 'Da scegliere',
+        };
+    }
+
+    public function openService(): void
+    {
+        // A chosen table is offered back for correction; a pickup has no number
+        // to correct, so the keypad starts empty.
+        $this->tableInput = $this->serviceType === ServiceType::TableService->value ? (string) $this->tableNumber : '';
+        $this->showService = true;
+    }
+
+    public function closeService(): void
+    {
+        $this->showService = false;
+    }
+
+    public function pressTableDigit(int $digit): void
+    {
+        // Four digits is what the column holds, and a leading zero would build a
+        // table 0 that does not exist in any hall.
+        if (strlen($this->tableInput) >= 4 || ($this->tableInput === '' && $digit === 0)) {
+            return;
         }
+
+        $this->tableInput .= $digit;
+    }
+
+    public function backspaceTable(): void
+    {
+        $this->tableInput = substr($this->tableInput, 0, -1);
+    }
+
+    public function clearTable(): void
+    {
+        $this->tableInput = '';
+    }
+
+    /**
+     * Takes the typed number as the sale's table.
+     */
+    public function chooseTable(): void
+    {
+        $number = (int) $this->tableInput;
+
+        if ($number < 1) {
+            return;
+        }
+
+        $this->serviceType = ServiceType::TableService->value;
+        $this->tableNumber = $number;
+        $this->showService = false;
+    }
+
+    /**
+     * Takes the sale as a pickup: no table, and the documents say Ritiro.
+     */
+    public function choosePickup(): void
+    {
+        $this->serviceType = ServiceType::Pickup->value;
+        $this->tableNumber = null;
+        $this->tableInput = '';
+        $this->showService = false;
     }
 
     public function updatedCovers(): void
@@ -1220,7 +1303,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function clearCart(): void
     {
         $this->releaseReservation();
-        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart');
+        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showClearCart');
     }
 
     public function openDiscount(): void
@@ -1257,7 +1340,27 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return 'La cassa selezionata non è più attiva. Riselezionala.';
         }
 
+        if ($this->serviceType === null) {
+            return 'Scegli il tavolo o il ritiro prima di incassare.';
+        }
+
         return null;
+    }
+
+    /**
+     * Guards a payment against a sale nobody has said where to send. Rather than
+     * report the missing step, it opens it: the cashier lands on the keypad, and
+     * the caller stops.
+     */
+    protected function requireServiceChoice(): bool
+    {
+        if ($this->serviceType !== null) {
+            return true;
+        }
+
+        $this->openService();
+
+        return false;
     }
 
     /**
@@ -1268,6 +1371,10 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     public function startFreeOrder(): void
     {
         if ($this->cart === [] || $this->orderTotal !== 0) {
+            return;
+        }
+
+        if (! $this->requireServiceChoice()) {
             return;
         }
 
@@ -1308,6 +1415,10 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
 
         if ($this->orderTotal === 0) {
+            return;
+        }
+
+        if (! $this->requireServiceChoice()) {
             return;
         }
 
@@ -1390,6 +1501,10 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
         // Nothing to charge: this sale is confirmed, not paid.
         if ($this->orderTotal === 0) {
+            return;
+        }
+
+        if (! $this->requireServiceChoice()) {
             return;
         }
 
@@ -1687,7 +1802,8 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
                 $this->day,
                 $this->cashRegister,
                 auth()->user(),
-                $this->tableNumber ?: null,
+                ServiceType::from($this->serviceType),
+                $this->tableNumber,
                 $this->customerName ?: null,
                 PaymentMethod::from($method),
                 $items,
@@ -1737,7 +1853,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         unset($this->cardTransaction);
 
         $this->placedOrderNumber = $order->number;
-        $this->reset('cart', 'tableNumber', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'showFreeOrder', 'cashReceivedCents', 'cashInput', 'reservationId', 'cardTransactionId', 'terminalBusyWith', 'terminalFreeAgain', 'unresolvedPayment', 'unresolvedAcknowledged', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
+        $this->reset('cart', 'serviceType', 'tableNumber', 'tableInput', 'customerName', 'covers', 'frozenCoverCharge', 'frozenDiscountAppliesToCover', 'discountType', 'discountValue', 'showDiscount', 'showCashModal', 'showCardModal', 'showFreeOrder', 'cashReceivedCents', 'cashInput', 'reservationId', 'cardTransactionId', 'terminalBusyWith', 'terminalFreeAgain', 'unresolvedPayment', 'unresolvedAcknowledged', 'showSoldOut', 'soldOutItems', 'showReservationExpired');
     }
 
     public function newOrder(): void

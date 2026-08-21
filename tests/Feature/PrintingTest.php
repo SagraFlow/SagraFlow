@@ -56,7 +56,7 @@ function orderWithRoute(bool $grouped = true, PrintDestination $destination = Pr
         'grouped' => $grouped,
     ]);
 
-    $order = Order::place($day, $register, null, 5, null, PaymentMethod::Cash, [
+    $order = Order::place($day, $register, null, ServiceType::TableService, 5, null, PaymentMethod::Cash, [
         ['food_id' => $food->id, 'food_name' => 'Panino', 'unit_price' => 500, 'quantity' => 2, 'note' => null, 'ingredients' => []],
     ]);
 
@@ -98,7 +98,7 @@ it('shows the amount received and change on a cash receipt', function () {
     $day = EventDay::factory()->create();
     $food = Food::factory()->create(['name' => 'Panino', 'price' => 500]);
 
-    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         ['food_id' => $food->id, 'food_name' => 'Panino', 'unit_price' => 500, 'quantity' => 2, 'note' => null, 'ingredients' => []],
     ], cashReceived: 2000);
 
@@ -163,7 +163,7 @@ function orderWithCoversRoute(int $covers = 4, PrintDestination $destination = P
         'grouped' => true,
     ]);
 
-    $order = Order::place($day, $register, null, 5, null, PaymentMethod::Cash, [
+    $order = Order::place($day, $register, null, ServiceType::TableService, 5, null, PaymentMethod::Cash, [
         ['food_id' => $food->id, 'food_name' => 'Panino', 'unit_price' => 500, 'quantity' => 1, 'note' => null, 'ingredients' => []],
     ], covers: $covers, coverCharge: 200);
 
@@ -335,7 +335,7 @@ it('routes a pickup stub to the register for a pickup order', function () {
         'grouped' => true,
     ]);
 
-    $order = Order::place($day, $register, null, null, null, PaymentMethod::Cash, [
+    $order = Order::place($day, $register, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         ['food_id' => $food->id, 'food_name' => 'Birra', 'unit_price' => 500, 'quantity' => 2, 'note' => null, 'ingredients' => []],
     ]);
 
@@ -408,7 +408,7 @@ it('records a failed print job without queuing when no printer is available', fu
         'grouped' => true,
     ]);
 
-    $order = Order::place($day, $register, null, 5, null, PaymentMethod::Cash, [
+    $order = Order::place($day, $register, null, ServiceType::TableService, 5, null, PaymentMethod::Cash, [
         ['food_id' => $food->id, 'food_name' => $food->name, 'unit_price' => 500, 'quantity' => 1, 'note' => null, 'ingredients' => []],
     ]);
 
@@ -526,6 +526,7 @@ it('queues printing when an order is placed from the pos', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')

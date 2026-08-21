@@ -69,7 +69,7 @@ it('places a paid table order with a progressive number and frozen snapshots', f
     $operator = User::factory()->create();
     [$food, $salamina] = foodWithSalamina();
 
-    $order = Order::place($day, $register, $operator, 5, 'Mario', PaymentMethod::Cash, [
+    $order = Order::place($day, $register, $operator, ServiceType::TableService, 5, 'Mario', PaymentMethod::Cash, [
         frozenLine($food, 1, [frozenIngredient($salamina, 1, 1)]),
     ]);
 
@@ -93,7 +93,7 @@ it('persists the frozen line snapshot instead of the current food price', functi
     $line = frozenLine($food, 2);
     $food->update(['price' => 700]);
 
-    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [$line]);
+    $order = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [$line]);
 
     expect($order->lines->first()->unit_price)->toBe(500)
         ->and($order->total)->toBe(1000);
@@ -102,7 +102,7 @@ it('persists the frozen line snapshot instead of the current food price', functi
 it('records a line even when the referenced food no longer exists', function () {
     $day = EventDay::factory()->create();
 
-    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         [
             'food_id' => null,
             'food_name' => 'Pietanza rimossa',
@@ -122,7 +122,7 @@ it('adds the cover charge to the total and freezes the per-cover amount', functi
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 400);
 
-    $order = Order::place($day, null, null, 5, 'Mario', PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::TableService, 5, 'Mario', PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], covers: 4, coverCharge: 150);
 
@@ -136,7 +136,7 @@ it('applies the discount before adding the cover charge', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 1000);
 
-    $order = Order::place($day, null, null, 2, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::TableService, 2, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Percentage, 10, covers: 3, coverCharge: 200);
 
@@ -149,7 +149,7 @@ it('discounts the cover charge when the setting is enabled', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 1000);
 
-    $order = Order::place($day, null, null, 2, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::TableService, 2, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Percentage, 10, covers: 3, coverCharge: 200, discountAppliesToCover: true);
 
@@ -162,7 +162,7 @@ it('stores the discount-applies-to-cover choice on the order', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 1000);
 
-    $order = Order::place($day, null, null, 1, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::TableService, 1, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Percentage, 10, covers: 2, coverCharge: 200, discountAppliesToCover: true);
 
@@ -170,23 +170,38 @@ it('stores the discount-applies-to-cover choice on the order', function () {
         ->and($order->total)->toBe(1260); // base 1000 + 400 coperto = 1400; -10% = 140; total 1260
 });
 
-it('derives the service type from the table number', function () {
+it('stores the service type it is given', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 
-    $table = Order::place($day, null, null, 7, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
-    $pickup = Order::place($day, null, null, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $table = Order::place($day, null, null, ServiceType::TableService, 7, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $pickup = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
 
     expect($table->service_type)->toBe(ServiceType::TableService)
+        ->and($table->table_number)->toBe(7)
         ->and($pickup->service_type)->toBe(ServiceType::Pickup)
         ->and($pickup->table_number)->toBeNull();
 });
+
+it('refuses table service without a table number', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina();
+
+    Order::place($day, null, null, ServiceType::TableService, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+})->throws(OrderException::class, 'Numero tavolo non valido.');
+
+it('refuses a pickup carrying a table number', function () {
+    $day = EventDay::factory()->create();
+    [$food] = foodWithSalamina();
+
+    Order::place($day, null, null, ServiceType::Pickup, 7, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+})->throws(OrderException::class, 'Un ordine da ritiro non ha un numero tavolo.');
 
 it('charges the surcharge only on units above the base dose', function () {
     $day = EventDay::factory()->create();
     [$food, $salamina] = foodWithSalamina(price: 400, base: 1, max: 2, surcharge: 200);
 
-    $order = Order::place($day, null, null, null, null, PaymentMethod::Card, [
+    $order = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Card, [
         frozenLine($food, 2, [frozenIngredient($salamina, 2, 1)]),
     ]);
 
@@ -199,9 +214,9 @@ it('numbers orders progressively within a day and independently across days', fu
     $day2 = EventDay::factory()->create(['date' => '2026-07-11']);
     [$food] = foodWithSalamina();
 
-    $a = Order::place($day1, null, null, 1, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
-    $b = Order::place($day1, null, null, 2, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
-    $c = Order::place($day2, null, null, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $a = Order::place($day1, null, null, ServiceType::TableService, 1, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $b = Order::place($day1, null, null, ServiceType::TableService, 2, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
+    $c = Order::place($day2, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [frozenLine($food, 1)]);
 
     expect([$a->number, $b->number, $c->number])->toBe([1, 2, 1]);
 });
@@ -210,7 +225,7 @@ it('applies a fixed discount to the total', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 400);
 
-    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Fixed, 100);
 
@@ -223,7 +238,7 @@ it('applies a percentage discount to the subtotal', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 1000);
 
-    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Percentage, 10);
 
@@ -236,7 +251,7 @@ it('never discounts more than the subtotal', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina(price: 400);
 
-    $order = Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Fixed, 5000);
 
@@ -248,7 +263,7 @@ it('rejects a percentage discount outside 0-100', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Percentage, 150);
 })->throws(OrderException::class);
@@ -257,7 +272,7 @@ it('rejects a negative fixed discount', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1),
     ], DiscountType::Fixed, -100);
 })->throws(OrderException::class);
@@ -270,7 +285,7 @@ it('rejects a customer name longer than 255 characters', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 
-    Order::place($day, null, null, null, str_repeat('a', 256), PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, str_repeat('a', 256), PaymentMethod::Cash, [
         frozenLine($food, 1),
     ]);
 })->throws(OrderException::class);
@@ -279,7 +294,7 @@ it('rejects a line note longer than 255 characters', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1, [], str_repeat('a', 256)),
     ]);
 })->throws(OrderException::class);
@@ -288,7 +303,7 @@ it('stores the covers count and per-line notes', function () {
     $day = EventDay::factory()->create();
     [$food] = foodWithSalamina();
 
-    $order = Order::place($day, null, null, 5, 'Mario', PaymentMethod::Cash, [
+    $order = Order::place($day, null, null, ServiceType::TableService, 5, 'Mario', PaymentMethod::Cash, [
         frozenLine($food, 1, [], 'ben cotto'),
     ], null, null, 4);
 
@@ -299,7 +314,7 @@ it('stores the covers count and per-line notes', function () {
 it('rejects an empty order', function () {
     $day = EventDay::factory()->create();
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, []);
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, []);
 })->throws(OrderException::class);
 
 it('decrements a tracked ingredient by dose times portions', function () {
@@ -307,7 +322,7 @@ it('decrements a tracked ingredient by dose times portions', function () {
     [$food, $salamina] = foodWithSalamina();
     $salamina->update(['stock' => 10]);
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 3, [frozenIngredient($salamina, 1, 1)]),
     ]);
 
@@ -319,7 +334,7 @@ it('does not consume stock for a removed ingredient', function () {
     [$food, $salamina] = foodWithSalamina(base: 1, min: 0, max: 2);
     $salamina->update(['stock' => 5]);
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 2, [frozenIngredient($salamina, 0, 1)]), // "senza"
     ]);
 
@@ -331,7 +346,7 @@ it('consumes extra stock for a doubled ingredient dose', function () {
     [$food, $salamina] = foodWithSalamina(base: 1, max: 2);
     $salamina->update(['stock' => 10]);
 
-    Order::place($day, null, null, null, null, PaymentMethod::Card, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Card, [
         frozenLine($food, 2, [frozenIngredient($salamina, 2, 1)]), // 2 dose x 2 portions
     ]);
 
@@ -342,7 +357,7 @@ it('never touches the stock of an untracked ingredient', function () {
     $day = EventDay::factory()->create();
     [$food, $salamina] = foodWithSalamina(); // stock null by default
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 100, [frozenIngredient($salamina, 2, 1)]),
     ]);
 
@@ -354,7 +369,7 @@ it('blocks an order that would oversell a tracked ingredient and rolls back', fu
     [$food, $salamina] = foodWithSalamina();
     $salamina->update(['stock' => 2]);
 
-    expect(fn () => Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    expect(fn () => Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 3, [frozenIngredient($salamina, 1, 1)]), // needs 3, only 2 left
     ]))->toThrow(OrderException::class, 'esaurito');
 
@@ -370,7 +385,7 @@ it('aggregates consumption of an ingredient shared across lines', function () {
     $piadina = Food::factory()->create();
     $piadina->ingredients()->attach($salsiccia->id, ['quantity' => 1, 'min_quantity' => 1, 'max_quantity' => 2]);
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($panino, 2, [frozenIngredient($salsiccia, 1, 1)]),   // 2
         frozenLine($piadina->fresh(), 1, [frozenIngredient($salsiccia, 1, 1)]), // 1
     ]);
@@ -383,12 +398,12 @@ it('runs the stock down to exactly zero then blocks the next order', function ()
     [$food, $salamina] = foodWithSalamina();
     $salamina->update(['stock' => 1]);
 
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1, [frozenIngredient($salamina, 1, 1)]),
     ]);
     expect($salamina->fresh()->stock)->toBe(0);
 
-    expect(fn () => Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    expect(fn () => Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 1, [frozenIngredient($salamina, 1, 1)]),
     ]))->toThrow(OrderException::class);
 
@@ -403,7 +418,7 @@ it('skips the stock decrement when consumeStock is false', function () {
 
     // The POS passes consumeStock: false because the stock was already held by
     // a reservation taken when the payment started.
-    Order::place($day, null, null, null, null, PaymentMethod::Cash, [
+    Order::place($day, null, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         frozenLine($food, 3, [frozenIngredient($salamina, 1, 1)]),
     ], consumeStock: false);
 

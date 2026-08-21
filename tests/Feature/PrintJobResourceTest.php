@@ -3,6 +3,7 @@
 use App\Enums\PaymentMethod;
 use App\Enums\PrintJobStatus;
 use App\Enums\PrintJobType;
+use App\Enums\ServiceType;
 use App\Filament\Resources\PrintJobs\Pages\ListPrintJobs;
 use App\Filament\Resources\PrintJobs\PrintJobResource;
 use App\Jobs\SendToPrinterJob;
@@ -47,7 +48,7 @@ it('requeues the order printing from a print job row', function () {
     $day = EventDay::factory()->create();
     $food = Food::factory()->create();
 
-    $order = Order::place($day, $register, null, null, null, PaymentMethod::Cash, [
+    $order = Order::place($day, $register, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, [
         ['food_id' => $food->id, 'food_name' => $food->name, 'unit_price' => 500, 'quantity' => 1, 'note' => null, 'ingredients' => []],
     ]);
 

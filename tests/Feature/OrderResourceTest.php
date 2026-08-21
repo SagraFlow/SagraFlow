@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PaymentMethod;
+use App\Enums\ServiceType;
 use App\Filament\Resources\Orders\OrderResource;
 use App\Filament\Resources\Orders\Pages\ListOrders;
 use App\Models\CashRegister;
@@ -31,7 +32,7 @@ function placedOrder(): Order
     $food = Food::factory()->create(['name' => 'Panino']);
     $salamina = Ingredient::factory()->create(['name' => 'Salamina', 'surcharge' => 200]);
 
-    return Order::place($day, $register, User::factory()->create(), 5, 'Mario', PaymentMethod::Cash, [
+    return Order::place($day, $register, User::factory()->create(), ServiceType::TableService, 5, 'Mario', PaymentMethod::Cash, [
         [
             'food_id' => $food->id,
             'food_name' => $food->name,

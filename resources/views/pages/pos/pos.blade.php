@@ -23,6 +23,7 @@
         </div>
 
         @include('pos.modals.customize')
+        @include('pos.modals.service')
         @include('pos.modals.clear-cart')
         @include('pos.modals.station-boards')
         @include('pos.modals.board-form')

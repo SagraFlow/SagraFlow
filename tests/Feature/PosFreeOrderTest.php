@@ -23,9 +23,12 @@ function fullyDiscountedTill(): object
     $register = CashRegister::factory()->create();
     $food = Food::factory()->create(['category_id' => Category::factory()->create()->id, 'price' => 1250]);
 
+    // The service choice is a step of its own, and it blocks the confirmation
+    // like it blocks a payment.
     return Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
+        ->call('choosePickup')
         ->set('discountType', 'percentage')
         ->set('discountValue', '100')
         ->call('applyDiscount');
@@ -95,6 +98,7 @@ it('leaves the two tender buttons alone when there is something to take', functi
         ->assertSee('Contanti')
         ->assertSee('Carta')
         ->assertDontSee('Conferma ordine')
+        ->call('choosePickup')
         ->call('startFreeOrder')
         ->assertSet('showFreeOrder', false);
 });
