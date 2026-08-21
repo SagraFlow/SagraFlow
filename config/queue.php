@@ -70,8 +70,10 @@ return [
             'queue' => env('REDIS_QUEUE', 'default'),
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
             // Blocking pop: the worker is woken the instant a job arrives instead
-            // of polling, so print pickup latency drops to milliseconds.
-            'block_for' => (int) env('REDIS_QUEUE_BLOCK_FOR', 5),
+            // of polling, so print pickup latency drops to milliseconds. Kept
+            // short because a worker inside a blocking read is not looking at
+            // delayed jobs, which is what a send released by a busy printer is.
+            'block_for' => (int) env('REDIS_QUEUE_BLOCK_FOR', 1),
             'after_commit' => false,
         ],
 

@@ -10,6 +10,7 @@ use App\Models\PrintJob;
 use App\Models\User;
 use App\Printing\PrinterConnection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
@@ -108,29 +109,50 @@ it('notifies for paper-out only after the grace period', function () {
 it('releases held jobs in order when the printer recovers', function () {
     Queue::fake();
     $printer = Printer::factory()->create(['status' => PrinterStatus::PaperOut]);
-    heldJob($printer);
-    heldJob($printer);
+    $first = heldJob($printer);
+    $second = heldJob($printer);
     fakeProbe(PrinterStatus::Ready);
 
     test()->artisan('printers:poll')->assertSuccessful();
 
     expect($printer->fresh()->status)->toBe(PrinterStatus::Ready);
-    Queue::assertPushed(SendToPrinterJob::class, 2);
+    // One send for the printer, carrying both documents in order.
+    Queue::assertPushed(SendToPrinterJob::class, 1);
+    Queue::assertPushed(fn (SendToPrinterJob $job): bool => $job->printJobIds === [$first->id, $second->id]);
+});
+
+it('skips a printer that is busy with a send in flight', function () {
+    Queue::fake();
+    $printer = Printer::factory()->create(['status' => PrinterStatus::Ready]);
+    heldJob($printer);
+    fakeProbe(PrinterStatus::Offline);
+
+    // The send holds the printer: probing it would steal its socket.
+    Cache::lock('printer:'.$printer->id, 30)->get();
+
+    test()->artisan('printers:poll')->assertSuccessful();
+
+    expect($printer->fresh()->status)->toBe(PrinterStatus::Ready)
+        ->and($printer->fresh()->last_checked_at)->toBeNull();
+    Queue::assertNothingPushed();
 });
 
 it('re-dispatches held/stale jobs and skips held jobs for a down printer', function () {
     Queue::fake();
 
     $ready = Printer::factory()->create(['status' => PrinterStatus::Ready]);
-    heldJob($ready);                                  // released
+    $held = heldJob($ready);                           // released
     $stale = heldJob($ready, PrintJobStatus::Sending); // stuck mid-send -> reclaimed
     DB::table('print_jobs')->where('id', $stale->id)->update(['updated_at' => now()->subMinutes(5)]);
 
     $down = Printer::factory()->create(['status' => PrinterStatus::Offline]);
-    heldJob($down);                                   // stays held (printer down)
+    heldJob($down);                                    // stays held (printer down)
 
     test()->artisan('print:reconcile')->assertSuccessful();
 
-    Queue::assertPushed(SendToPrinterJob::class, 2);
+    // Both documents of the ready printer travel in one send; the down printer
+    // gets nothing.
+    Queue::assertPushed(SendToPrinterJob::class, 1);
+    Queue::assertPushed(fn (SendToPrinterJob $job): bool => $job->printJobIds === [$held->id, $stale->id]);
     expect($stale->fresh()->status)->toBe(PrintJobStatus::Pending);
 });

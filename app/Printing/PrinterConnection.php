@@ -4,33 +4,45 @@ namespace App\Printing;
 
 use App\Enums\PrinterStatus;
 use App\Exceptions\PrinterException;
+use Closure;
 
 /**
- * Talks to a network printer over a TCP socket: transmits raw ESC/POS bytes and
- * queries the printer's real-time status (DLE EOT), with bounded timeouts so an
- * offline or silent printer never hangs the worker.
+ * Talks to a network printer over a TCP socket: opens sessions that transmit
+ * raw ESC/POS bytes and query the printer's real-time status (DLE EOT), with
+ * bounded timeouts so an offline or silent printer never hangs the worker.
  */
 class PrinterConnection
 {
     public function __construct(private PrinterStatusParser $parser) {}
 
-    public function send(string $host, int $port, string $data, int $timeout = 5): void
+    /**
+     * Opens one connection and hands it to the callback as a session, closing it
+     * afterwards. Everything the printer is told or asked within the callback
+     * travels over that single socket.
+     *
+     * @template TReturn
+     *
+     * @param  Closure(PrinterSession): TReturn  $callback
+     * @return TReturn
+     */
+    public function session(string $host, int $port, Closure $callback, int $connectTimeout = 5, ?int $writeTimeout = null): mixed
     {
-        $socket = @fsockopen($host, $port, $errno, $errstr, $timeout);
+        $socket = @fsockopen($host, $port, $errno, $errstr, $connectTimeout);
 
         if ($socket === false) {
             throw new PrinterException("Connessione a {$host}:{$port} fallita: {$errstr} ({$errno}).");
         }
 
         try {
-            stream_set_timeout($socket, $timeout);
-
-            if (@fwrite($socket, $data) === false) {
-                throw new PrinterException("Invio dei dati a {$host}:{$port} fallito.");
-            }
+            return $callback(new PrinterSession($socket, $this->parser, $host, $port, $writeTimeout ?? $connectTimeout));
         } finally {
             fclose($socket);
         }
+    }
+
+    public function send(string $host, int $port, string $data, int $timeout = 5): void
+    {
+        $this->session($host, $port, fn (PrinterSession $session) => $session->write($data), $timeout);
     }
 
     /**
@@ -41,23 +53,15 @@ class PrinterConnection
      */
     public function probe(string $host, int $port, int $connectTimeout = 2, int $readTimeoutMs = 300): PrinterStatus
     {
-        $socket = @fsockopen($host, $port, $errno, $errstr, $connectTimeout);
-
-        if ($socket === false) {
-            return PrinterStatus::Offline;
-        }
-
         try {
-            stream_set_timeout($socket, 0, $readTimeoutMs * 1000);
-
-            $bytes = [];
-            foreach ([1, 2, 4] as $n) {
-                $bytes[$n] = $this->query($socket, $n);
-            }
-
-            return $this->parser->parse($bytes);
-        } finally {
-            fclose($socket);
+            return $this->session(
+                $host,
+                $port,
+                fn (PrinterSession $session) => $session->status($readTimeoutMs),
+                $connectTimeout,
+            );
+        } catch (PrinterException) {
+            return PrinterStatus::Offline;
         }
     }
 
@@ -71,20 +75,13 @@ class PrinterConnection
      */
     public function offlineStatusEnabled(string $host, int $port, int $connectTimeout = 2, int $readTimeoutMs = 500): ?bool
     {
-        $socket = @fsockopen($host, $port, $errno, $errstr, $connectTimeout);
-
-        if ($socket === false) {
-            return null;
-        }
-
         try {
-            stream_set_timeout($socket, 0, $readTimeoutMs * 1000);
-            // GS ( E <Function 4>: transmit the settings of memory switch 1.
-            @fwrite($socket, "\x1d\x28\x45\x02\x00\x04\x01");
-
-            return $this->parseOfflineStatusSetting($this->readBytes($socket, 11));
-        } finally {
-            fclose($socket);
+            return $this->session($host, $port, fn (PrinterSession $session): ?bool => $this->parseOfflineStatusSetting(
+                // GS ( E <Function 4>: transmit the settings of memory switch 1.
+                $session->request("\x1d\x28\x45\x02\x00\x04\x01", 11, $readTimeoutMs),
+            ), $connectTimeout);
+        } catch (PrinterException) {
+            return null;
         }
     }
 
@@ -111,67 +108,16 @@ class PrinterConnection
      */
     public function enableOfflineStatus(string $host, int $port, int $connectTimeout = 3, int $readTimeoutMs = 1000): void
     {
-        $socket = @fsockopen($host, $port, $errno, $errstr, $connectTimeout);
-
-        if ($socket === false) {
-            throw new PrinterException("Connessione a {$host}:{$port} fallita: {$errstr} ({$errno}).");
-        }
-
-        try {
-            stream_set_timeout($socket, 0, $readTimeoutMs * 1000);
-
+        $this->session($host, $port, function (PrinterSession $session) use ($readTimeoutMs): void {
             // Function 1: enter user setting mode, then wait for the mode-change notice.
-            @fwrite($socket, "\x1d\x28\x45\x03\x00\x01\x49\x4e");
-            $this->readBytes($socket, 3);
+            $session->request("\x1d\x28\x45\x03\x00\x01\x49\x4e", 3, $readTimeoutMs);
 
             // Function 3: set Msw1-3 (Condition for BUSY) ON, leaving the rest unchanged.
             $bits = chr(50).chr(50).chr(50).chr(50).chr(50).chr(49).chr(50).chr(50); // b8..b1, b3 = ON
-            @fwrite($socket, "\x1d\x28\x45\x0a\x00\x03\x01".$bits);
+            $session->write("\x1d\x28\x45\x0a\x00\x03\x01".$bits);
 
             // Function 2: end user setting mode + software reset (applies the change).
-            @fwrite($socket, "\x1d\x28\x45\x04\x00\x02\x4f\x55\x54");
-        } finally {
-            fclose($socket);
-        }
-    }
-
-    /**
-     * Reads up to $max bytes, returning early when the printer stops sending
-     * (read timeout), so a silent printer never blocks past the timeout.
-     */
-    private function readBytes($socket, int $max): string
-    {
-        $buffer = '';
-
-        while (strlen($buffer) < $max) {
-            $chunk = @fread($socket, $max - strlen($buffer));
-
-            if ($chunk === false || $chunk === '') {
-                break;
-            }
-
-            $buffer .= $chunk;
-        }
-
-        return $buffer;
-    }
-
-    /**
-     * Sends a single DLE EOT n status query and reads the one-byte reply,
-     * returning null when the printer does not answer within the read timeout.
-     */
-    private function query($socket, int $n): ?int
-    {
-        if (@fwrite($socket, "\x10\x04".chr($n)) === false) {
-            return null;
-        }
-
-        $response = @fread($socket, 1);
-
-        if ($response === false || $response === '') {
-            return null;
-        }
-
-        return ord($response);
+            $session->write("\x1d\x28\x45\x04\x00\x02\x4f\x55\x54");
+        }, $connectTimeout);
     }
 }

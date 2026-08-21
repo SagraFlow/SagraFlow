@@ -1,12 +1,68 @@
 <?php
 
+use App\Enums\PrinterStatus;
+use App\Exceptions\PrinterException;
 use App\Printing\PrinterConnection;
+use App\Printing\PrinterSession;
 use App\Printing\PrinterStatusParser;
 
 function connection(): PrinterConnection
 {
     return new PrinterConnection(new PrinterStatusParser);
 }
+
+/**
+ * A listening socket standing in for a printer, and the port it answers on.
+ *
+ * @return array{0: resource, 1: int}
+ */
+function fakePrinter(): array
+{
+    $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+
+    return [$server, (int) explode(':', stream_socket_get_name($server, false))[1]];
+}
+
+it('transmits every document of a session over the same connection', function () {
+    [$server, $port] = fakePrinter();
+
+    connection()->session('127.0.0.1', $port, function (PrinterSession $session): void {
+        $session->write('SCONTRINO');
+        $session->write('TAGLIANDINO');
+    });
+
+    $printer = stream_socket_accept($server, 1);
+    stream_set_timeout($printer, 0, 100_000);
+
+    expect(fread($printer, 64))->toBe('SCONTRINOTAGLIANDINO');
+
+    fclose($printer);
+    fclose($server);
+});
+
+it('reports a reachable but silent printer as offline', function () {
+    [$server, $port] = fakePrinter();
+
+    $status = connection()->probe('127.0.0.1', $port, readTimeoutMs: 50);
+
+    expect($status)->toBe(PrinterStatus::Offline);
+
+    fclose($server);
+});
+
+it('reports an unreachable printer as offline instead of failing', function () {
+    [$server, $port] = fakePrinter();
+    fclose($server); // nothing listening on the port any more
+
+    expect(connection()->probe('127.0.0.1', $port, connectTimeout: 1))->toBe(PrinterStatus::Offline);
+});
+
+it('fails a send to an unreachable printer, so the job can park it', function () {
+    [$server, $port] = fakePrinter();
+    fclose($server);
+
+    connection()->send('127.0.0.1', $port, 'SCONTRINO', timeout: 1);
+})->throws(PrinterException::class);
 
 it('reads whether offline status reporting is enabled from the memory-switch reply', function (string $response, ?bool $expected) {
     expect(connection()->parseOfflineStatusSetting($response))->toBe($expected);

@@ -26,10 +26,13 @@ use App\Printing\Documents\TestTicket;
 use App\Printing\OrderPrinter;
 use App\Printing\OrderPrintRouter;
 use App\Printing\PrinterConnection;
+use App\Printing\PrinterLock;
+use App\Printing\PrinterSession;
 use App\Settings\EventSettings;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
@@ -402,6 +405,20 @@ it('queues a send job and records a print job per document', function () {
     expect(PrintJob::where('order_id', $order->id)->where('status', PrintJobStatus::Pending)->count())->toBe(2);
 });
 
+it('queues one send per printer, carrying every document that shares it', function () {
+    Queue::fake();
+    ['order' => $order, 'registerPrinter' => $printer] = orderWithRoute(destination: PrintDestination::CashRegister);
+
+    app(OrderPrinter::class)->print($order);
+
+    // Receipt + comanda on the till printer: one queue message, one connection,
+    // and on the latency-critical queue because a receipt is in it.
+    Queue::assertPushed(SendToPrinterJob::class, 1);
+    Queue::assertPushed(fn (SendToPrinterJob $job): bool => $job->printerId === $printer->id
+        && count($job->printJobIds) === 2
+        && $job->queue === 'receipts');
+});
+
 it('records a failed print job without queuing when no printer is available', function () {
     Queue::fake();
 
@@ -431,44 +448,100 @@ it('records a failed print job without queuing when no printer is available', fu
 /**
  * A Pending comanda PrintJob bound to a printer, with a frozen render spec.
  */
-function pendingPrintJob(array $printerAttributes = []): PrintJob
+function pendingPrintJob(array $printerAttributes = [], ?Printer $printer = null, PrintJobType $type = PrintJobType::DepartmentTicket): PrintJob
 {
-    $printer = Printer::factory()->create([...['ip_address' => '1.2.3.4', 'port' => 9100], ...$printerAttributes]);
+    $printer ??= Printer::factory()->create([...['ip_address' => '1.2.3.4', 'port' => 9100], ...$printerAttributes]);
 
     return PrintJob::create([
         'order_id' => Order::factory()->create()->id,
         'printer_id' => $printer->id,
         'printer_name' => $printer->name,
-        'type' => PrintJobType::DepartmentTicket,
+        'type' => $type,
         'label' => 'Comanda',
         'status' => PrintJobStatus::Pending,
         'spec' => ['items' => [['name' => 'Panino', 'quantity' => 1, 'deviation' => '', 'note' => null]]],
     ]);
 }
 
+/**
+ * A PrinterConnection that hands every session the given fake printer.
+ */
+function connectionTo(PrinterSession $session, int $sessions = 1): PrinterConnection
+{
+    $connection = Mockery::mock(PrinterConnection::class);
+    $connection->shouldReceive('session')->times($sessions)->andReturnUsing(
+        fn (string $host, int $port, Closure $callback) => $callback($session),
+    );
+
+    return $connection;
+}
+
+function sendBatch(PrinterConnection $connection, PrintJob ...$printJobs): void
+{
+    $job = new SendToPrinterJob($printJobs[0]->printer_id, array_map(fn (PrintJob $printJob): int => $printJob->id, $printJobs));
+
+    $job->handle($connection, app(DocumentFactory::class), app(PrinterLock::class));
+}
+
 it('marks the print job printed after a successful send to a ready printer', function () {
     $printJob = pendingPrintJob();
 
-    $connection = Mockery::mock(PrinterConnection::class);
-    $connection->shouldReceive('probe')->once()->andReturn(PrinterStatus::Ready);
+    $session = Mockery::mock(PrinterSession::class);
+    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
     // The worker renders the document from the spec at send time.
-    $connection->shouldReceive('send')->once()->with('1.2.3.4', 9100, Mockery::type('string'));
+    $session->shouldReceive('write')->once()->with(Mockery::type('string'));
 
-    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+    sendBatch(connectionTo($session), $printJob);
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Printed)
         ->and($printJob->fresh()->printed_at)->not->toBeNull()
         ->and($printJob->fresh()->sent_at)->not->toBeNull();
 });
 
+it('sends every document for one printer over a single connection, in order', function () {
+    $printer = Printer::factory()->create();
+    $receipt = pendingPrintJob(printer: $printer, type: PrintJobType::CustomerReceipt);
+    $firstStub = pendingPrintJob(printer: $printer, type: PrintJobType::PickupStub);
+    $secondStub = pendingPrintJob(printer: $printer, type: PrintJobType::PickupStub);
+
+    $writes = [];
+    $session = Mockery::mock(PrinterSession::class);
+    // One status query for the batch, then the documents back to back.
+    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
+    $session->shouldReceive('write')->times(3)->andReturnUsing(function (string $data) use (&$writes): void {
+        $writes[] = $data;
+    });
+
+    // A single session for the three documents.
+    sendBatch(connectionTo($session, sessions: 1), $receipt, $firstStub, $secondStub);
+
+    expect(PrintJob::whereIn('id', [$receipt->id, $firstStub->id, $secondStub->id])->where('status', PrintJobStatus::Printed)->count())->toBe(3)
+        // The receipt (the only document with a total) went out first.
+        ->and($writes[0])->toContain('TOTALE')
+        ->and($writes[1])->not->toContain('TOTALE');
+});
+
+it('asks a silent printer again before parking the batch, since it is usually mid-document', function () {
+    $printJob = pendingPrintJob();
+
+    $session = Mockery::mock(PrinterSession::class);
+    // Busy printing the previous order, then free.
+    $session->shouldReceive('status')->twice()->andReturn(PrinterStatus::Offline, PrinterStatus::Ready);
+    $session->shouldReceive('write')->once();
+
+    sendBatch(connectionTo($session), $printJob);
+
+    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Printed);
+});
+
 it('holds the print job and never sends when the printer is not ready', function () {
     $printJob = pendingPrintJob();
 
-    $connection = Mockery::mock(PrinterConnection::class);
-    $connection->shouldReceive('probe')->once()->andReturn(PrinterStatus::PaperOut);
-    $connection->shouldReceive('send')->never();
+    $session = Mockery::mock(PrinterSession::class);
+    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::PaperOut);
+    $session->shouldReceive('write')->never();
 
-    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+    sendBatch(connectionTo($session), $printJob);
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Held)
         ->and($printJob->printer->fresh()->status)->toBe(PrinterStatus::PaperOut);
@@ -477,13 +550,45 @@ it('holds the print job and never sends when the printer is not ready', function
 it('parks the job as held when the send fails, so a print is never lost', function () {
     $printJob = pendingPrintJob();
 
-    $connection = Mockery::mock(PrinterConnection::class);
-    $connection->shouldReceive('probe')->once()->andReturn(PrinterStatus::Ready);
-    $connection->shouldReceive('send')->once()->andThrow(new PrinterException('Stampante offline'));
+    $session = Mockery::mock(PrinterSession::class);
+    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
+    $session->shouldReceive('write')->once()->andThrow(new PrinterException('Stampante offline'));
 
-    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+    sendBatch(connectionTo($session), $printJob);
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Held);
+});
+
+it('holds the rest of the batch when a send breaks down halfway', function () {
+    $printer = Printer::factory()->create();
+    $first = pendingPrintJob(printer: $printer);
+    $second = pendingPrintJob(printer: $printer);
+
+    $session = Mockery::mock(PrinterSession::class);
+    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
+    $session->shouldReceive('write')->once()->andReturnUsing(function (): void {
+        // The first document goes out, then the printer disappears.
+    });
+    $session->shouldReceive('write')->once()->andThrow(new PrinterException('Stampante offline'));
+
+    sendBatch(connectionTo($session), $first, $second);
+
+    expect($first->fresh()->status)->toBe(PrintJobStatus::Printed)
+        ->and($second->fresh()->status)->toBe(PrintJobStatus::Held);
+});
+
+it('leaves the batch queued when another process holds the printer', function () {
+    $printJob = pendingPrintJob();
+
+    $connection = Mockery::mock(PrinterConnection::class);
+    $connection->shouldReceive('session')->never();
+
+    // A health poll (or another till's send) is talking to the printer.
+    Cache::lock('printer:'.$printJob->printer_id, 30)->get();
+
+    sendBatch($connection, $printJob);
+
+    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Pending);
 });
 
 it('is a no-op when the job was already claimed by another worker', function () {
@@ -491,10 +596,9 @@ it('is a no-op when the job was already claimed by another worker', function () 
     $printJob->update(['status' => PrintJobStatus::Sending]); // already claimed
 
     $connection = Mockery::mock(PrinterConnection::class);
-    $connection->shouldReceive('probe')->never();
-    $connection->shouldReceive('send')->never();
+    $connection->shouldReceive('session')->never();
 
-    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+    sendBatch($connection, $printJob);
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Sending);
 });
@@ -504,10 +608,9 @@ it('never sends a cancelled job', function () {
     $printJob->update(['status' => PrintJobStatus::Cancelled]);
 
     $connection = Mockery::mock(PrinterConnection::class);
-    $connection->shouldReceive('probe')->never();
-    $connection->shouldReceive('send')->never();
+    $connection->shouldReceive('session')->never();
 
-    (new SendToPrinterJob($printJob->id))->handle($connection, app(DocumentFactory::class));
+    sendBatch($connection, $printJob);
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Cancelled);
 });
@@ -515,10 +618,22 @@ it('never sends a cancelled job', function () {
 it('marks the print job failed when the job ultimately fails', function () {
     $printJob = pendingPrintJob();
 
-    (new SendToPrinterJob($printJob->id))->failed(new PrinterException('Stampante offline'));
+    (new SendToPrinterJob($printJob->printer_id, [$printJob->id]))->failed(new PrinterException('Stampante offline'));
 
     expect($printJob->fresh()->status)->toBe(PrintJobStatus::Failed)
         ->and($printJob->fresh()->error)->toContain('offline');
+});
+
+it('keeps the documents it already printed when the batch ultimately fails', function () {
+    $printer = Printer::factory()->create();
+    $printed = pendingPrintJob(printer: $printer);
+    $printed->update(['status' => PrintJobStatus::Printed]);
+    $pending = pendingPrintJob(printer: $printer);
+
+    (new SendToPrinterJob($printer->id, [$printed->id, $pending->id]))->failed(new PrinterException('Stampante offline'));
+
+    expect($printed->fresh()->status)->toBe(PrintJobStatus::Printed)
+        ->and($pending->fresh()->status)->toBe(PrintJobStatus::Failed);
 });
 
 it('queues printing when an order is placed from the pos', function () {
