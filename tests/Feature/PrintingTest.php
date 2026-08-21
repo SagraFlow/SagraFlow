@@ -577,6 +577,40 @@ it('holds the rest of the batch when a send breaks down halfway', function () {
         ->and($second->fresh()->status)->toBe(PrintJobStatus::Held);
 });
 
+it('hands a very long order over in runs, so no run outlives its own timeout', function () {
+    $printer = Printer::factory()->create();
+    $printJobs = collect(range(1, 27))->map(fn (): PrintJob => pendingPrintJob(printer: $printer));
+
+    $session = Mockery::mock(PrinterSession::class);
+    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
+    $session->shouldReceive('write')->times(25);
+
+    Queue::fake();
+    sendBatch(connectionTo($session), ...$printJobs->all());
+
+    // Twenty-five out, the last two passed on to a run of their own, in order.
+    expect(PrintJob::where('status', PrintJobStatus::Printed)->count())->toBe(25);
+    Queue::assertPushed(fn (SendToPrinterJob $job): bool => $job->printJobIds === $printJobs->slice(25)->pluck('id')->all());
+});
+
+it('reads the printer once for the whole batch, not between its documents', function () {
+    $printer = Printer::factory()->create();
+    $first = pendingPrintJob(printer: $printer);
+    $second = pendingPrintJob(printer: $printer);
+    $third = pendingPrintJob(printer: $printer);
+
+    // The whole order goes over in about a second and the printer finishes it
+    // from its own buffer even if the roll runs out, so asking again between the
+    // documents buys nothing: one question, three documents.
+    $session = Mockery::mock(PrinterSession::class);
+    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
+    $session->shouldReceive('write')->times(3);
+
+    sendBatch(connectionTo($session), $first, $second, $third);
+
+    expect(PrintJob::whereIn('id', [$first->id, $second->id, $third->id])->where('status', PrintJobStatus::Printed)->count())->toBe(3);
+});
+
 it('leaves the batch queued when another process holds the printer', function () {
     $printJob = pendingPrintJob();
 

@@ -134,7 +134,7 @@ it('kicks the cash drawer on the register printer', function () {
     $this->mock(PrinterConnection::class)
         ->shouldReceive('send')
         ->once()
-        ->with('1.2.3.4', 9100, Mockery::type('string'), 3);
+        ->with('1.2.3.4', 9100, Mockery::type('string'), 1);
 
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)

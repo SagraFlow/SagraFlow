@@ -665,7 +665,10 @@ it('puts a board hidden here out of reach on this station', function () {
         ->call('enterBoardConfig')
         ->call('selectTab', $bar->id)
         ->call('toggleBoardHere', $bar->id)
-        ->assertDontSee('Bar');   // out of the bar even while arranging
+        // Asserted on the board's own key rather than on the word "Bar": the
+        // logged-in operator carries a faker name, and one called Barrows made
+        // this pass or fail by luck.
+        ->assertDontSee('wire:key="bar-'.$bar->id.'"', escape: false);
 
     // Hidden means hidden: it cannot be worked on from here either, so the
     // screen falls back to the complete tab. Show it again, or arrange it from

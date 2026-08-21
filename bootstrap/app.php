@@ -13,15 +13,23 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withSchedule(function (Schedule $schedule): void {
+        // Every withoutOverlapping here carries its own expiry, deliberately.
+        // The default is a day: a run killed mid-flight (a container restarted,
+        // a machine rebooted) leaves its lock behind, and the task then skips
+        // every turn until tomorrow. These are the safety nets of a sagra
+        // evening, so each one is allowed to be silent for minutes at worst -
+        // just long enough that a slow run is not trampled by the next.
+        //
         // Printer health heartbeat + queue reconciliation.
-        $schedule->command('printers:poll')->everyFifteenSeconds()->withoutOverlapping();
-        $schedule->command('print:reconcile')->everyMinute()->withoutOverlapping();
+        $schedule->command('printers:poll')->everyFifteenSeconds()->withoutOverlapping(1);
+        $schedule->command('print:reconcile')->everyMinute()->withoutOverlapping(2);
         // Free stock held by checkouts that never confirmed nor cancelled.
-        $schedule->command('stock:release-reservations')->everyMinute()->withoutOverlapping();
+        $schedule->command('stock:release-reservations')->everyMinute()->withoutOverlapping(2);
         // Ask the terminals about payments left without an answer, while they
         // can still answer: their memory holds one transaction, and a station
-        // that takes the terminal next overwrites it.
-        $schedule->command('card:reconcile')->everyMinute()->withoutOverlapping();
+        // that takes the terminal next overwrites it. Given more room than the
+        // others: it talks to devices over the network, one at a time.
+        $schedule->command('card:reconcile')->everyMinute()->withoutOverlapping(5);
         // Populate the Horizon metrics dashboard.
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
     })

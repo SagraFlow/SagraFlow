@@ -23,6 +23,7 @@ function recordingPrinter(): object
 {
     $sent = new stdClass;
     $sent->payloads = [];
+    $sent->timeouts = [];
 
     app()->instance(PrinterConnection::class, new class($sent) extends PrinterConnection
     {
@@ -34,11 +35,30 @@ function recordingPrinter(): object
         public function send(string $host, int $port, string $data, int $timeout = 5): void
         {
             $this->sent->payloads[] = $data;
+            $this->sent->timeouts[] = $timeout;
         }
     });
 
     return $sent;
 }
+
+it('never keeps the cashier waiting more than a second for the drawer', function () {
+    $sent = recordingPrinter();
+    $printer = Printer::factory()->create();
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+    $food = Food::factory()->create(['category_id' => Category::factory()->create()->id, 'price' => 500]);
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('choosePickup')
+        ->call('startCash');
+
+    // The pulse is sent while the cashier waits for the screen, and the printer
+    // answers in a millisecond or two: this timeout is only ever paid when it is
+    // not answering at all.
+    expect($sent->timeouts)->toBe([1]);
+});
 
 it('opens the drawer as the cash screen opens, not when the receipt prints', function () {
     $sent = recordingPrinter();

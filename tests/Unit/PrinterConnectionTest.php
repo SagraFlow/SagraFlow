@@ -40,6 +40,50 @@ it('transmits every document of a session over the same connection', function ()
     fclose($server);
 });
 
+it('hands over a document too large for one go, all of it', function () {
+    [$server, $port] = fakePrinter();
+
+    // Far more than a receipt with a logo, so the write takes several goes.
+    $document = str_repeat('X', 200_000);
+
+    connection()->session('127.0.0.1', $port, fn (PrinterSession $session) => $session->write($document));
+
+    $printer = stream_socket_accept($server, 1);
+    stream_set_timeout($printer, 1);
+
+    $received = '';
+    while (strlen($received) < strlen($document)) {
+        $chunk = fread($printer, 65536);
+
+        if ($chunk === false || $chunk === '') {
+            break;
+        }
+
+        $received .= $chunk;
+    }
+
+    expect(strlen($received))->toBe(strlen($document));
+
+    fclose($printer);
+    fclose($server);
+});
+
+it('fails instead of half-printing when the printer stops taking data', function () {
+    [$server, $port] = fakePrinter();
+
+    // Nothing ever reads on the other side: the socket buffers fill and the
+    // write stalls, which is what a printer whose paper cannot keep up does.
+    connection()->session(
+        '127.0.0.1',
+        $port,
+        fn (PrinterSession $session) => $session->write(str_repeat('X', 64 * 1024 * 1024)),
+        connectTimeout: 1,
+        writeTimeout: 1,
+    );
+
+    fclose($server);
+})->throws(PrinterException::class, 'interrotto dopo');
+
 it('reports a reachable but silent printer as offline', function () {
     [$server, $port] = fakePrinter();
 

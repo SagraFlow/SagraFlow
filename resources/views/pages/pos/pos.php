@@ -1004,7 +1004,14 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
     /**
      * Kick the cash drawer via an ESC/POS pulse to the register's local printer.
      * Sent synchronously (not queued) so the drawer pops instantly on press; a
-     * failure surfaces as a message instead of failing silently.
+     * failure surfaces as a message instead of failing silently. A queue would
+     * be the wrong promise anyway: it exists so work is not lost, while a drawer
+     * pulse is only worth anything if it is not late.
+     *
+     * One second of patience, measured rather than guessed: reaching the printer
+     * on the till's own network takes one or two milliseconds. So the timeout is
+     * only ever paid when the printer is not answering at all, and then the
+     * cashier loses a second instead of standing there for three.
      */
     public function openCashDrawer(): void
     {
@@ -1017,7 +1024,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         }
 
         try {
-            app(PrinterConnection::class)->send($printer->ip_address, $printer->port, (new DrawerKick)->render(), timeout: 3);
+            app(PrinterConnection::class)->send($printer->ip_address, $printer->port, (new DrawerKick)->render(), timeout: 1);
         } catch (PrinterException) {
             $this->dispatch('pos-notice', message: 'Impossibile aprire il cassetto: stampante non raggiungibile.');
         }

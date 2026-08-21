@@ -45,14 +45,29 @@ class PrinterSession
     }
 
     /**
-     * Transmits raw ESC/POS bytes to the printer.
+     * Transmits raw ESC/POS bytes to the printer, all of them.
+     *
+     * Written in a loop on purpose: a document larger than the printer's receive
+     * buffer (a logo is a bitmap, and a busy printer drains slowly) is handed
+     * over in several goes, because TCP holds us back until the paper catches
+     * up. A single fwrite would return how much it managed to write rather than
+     * fail, and a document cut in half would be recorded as printed.
      */
     public function write(string $data): void
     {
         stream_set_timeout($this->socket, $this->writeTimeout);
 
-        if (@fwrite($this->socket, $data) === false) {
-            throw new PrinterException("Invio dei dati a {$this->host}:{$this->port} fallito.");
+        $total = strlen($data);
+
+        for ($written = 0; $written < $total;) {
+            $chunk = @fwrite($this->socket, substr($data, $written));
+
+            // No progress within the timeout: the printer stopped taking data.
+            if ($chunk === false || $chunk === 0) {
+                throw new PrinterException("Invio dei dati a {$this->host}:{$this->port} interrotto dopo {$written} byte su {$total}.");
+            }
+
+            $written += $chunk;
         }
     }
 
