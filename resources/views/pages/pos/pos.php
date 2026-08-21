@@ -32,6 +32,12 @@ use Livewire\Component;
 
 new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Component
 {
+    /** Digits a table number can have, which is what the column holds. */
+    public const TABLE_DIGITS = 4;
+
+    /** Digits a covers count can have: more people than any hall seats. */
+    public const COVERS_DIGITS = 3;
+
     public ?int $cashRegisterId = null;
 
     /**
@@ -104,7 +110,12 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public bool $showService = false;
 
-    /** Digits pressed on the keypad, before they are confirmed as the table. */
+    /**
+     * Digits the table keypad opens on. The pad itself is pressed in the
+     * browser: only what it confirms comes back here, so this is a starting
+     * value, not a running one.
+     */
+    #[Locked]
     public string $tableInput = '';
 
     public ?string $customerName = null;
@@ -119,7 +130,8 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
 
     public bool $showCovers = false;
 
-    /** Digits pressed on the keypad, before they are confirmed as the covers. */
+    /** Digits the covers keypad opens on, pressed in the browser like the table's. */
+    #[Locked]
     public string $coversInput = '';
 
     /** Per-cover charge (coperto) frozen when the sale started, in cents. */
@@ -1037,47 +1049,24 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $this->showService = false;
     }
 
-    public function pressTableDigit(int $digit): void
-    {
-        // A hall can number a table 0, so it is typed like any other number -
-        // but only as the whole number: the next digit takes its place rather
-        // than building an 04.
-        if ($this->tableInput === '0') {
-            $this->tableInput = (string) $digit;
-
-            return;
-        }
-
-        // Four digits is what the column holds.
-        if (strlen($this->tableInput) >= 4) {
-            return;
-        }
-
-        $this->tableInput .= $digit;
-    }
-
-    public function backspaceTable(): void
-    {
-        $this->tableInput = substr($this->tableInput, 0, -1);
-    }
-
-    public function clearTable(): void
-    {
-        $this->tableInput = '';
-    }
-
     /**
-     * Takes the typed number as the sale's table, zero included. An empty keypad
-     * is no answer at all and confirms nothing.
+     * Takes what the keypad sends as the sale's table, zero included. The pad
+     * itself runs in the browser, so that pressing four digits does not cost
+     * four renders of the whole till: this is where what it sends is checked.
+     * Anything that is not digits is not a table, an empty pad is no answer at
+     * all, and a longer number is cut to what the field holds.
      */
-    public function chooseTable(): void
+    public function chooseTable(string $input): void
     {
-        if ($this->tableInput === '') {
+        $digits = $this->digitsOf($input, self::TABLE_DIGITS);
+
+        if ($digits === '') {
             return;
         }
 
         $this->serviceType = ServiceType::TableService->value;
-        $this->tableNumber = (int) $this->tableInput;
+        $this->tableNumber = (int) $digits;
+        $this->tableInput = $digits;
         $this->showService = false;
 
         // A table has just been laid: how many people sit at it is the next thing
@@ -1125,48 +1114,32 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         $this->showCovers = false;
     }
 
-    public function pressCoversDigit(int $digit): void
+    /**
+     * Takes what the keypad sends as the sale's covers, zero included: an order
+     * laid for nobody is answered with a 0, not with a key of its own. Checked
+     * like the table's, and for the same reason.
+     */
+    public function chooseCovers(string $input): void
     {
-        // Zero is a real answer to "how many", so it is typed like any other
-        // number - but only as the whole answer: the next digit takes its place
-        // rather than building an 04.
-        if ($this->coversInput === '0') {
-            $this->coversInput = (string) $digit;
+        $digits = $this->digitsOf($input, self::COVERS_DIGITS);
 
+        if ($digits === '') {
             return;
         }
 
-        // Three digits is more people than any hall seats.
-        if (strlen($this->coversInput) >= 3) {
-            return;
-        }
-
-        $this->coversInput .= $digit;
-    }
-
-    public function backspaceCovers(): void
-    {
-        $this->coversInput = substr($this->coversInput, 0, -1);
-    }
-
-    public function clearCovers(): void
-    {
-        $this->coversInput = '';
+        $this->covers = (int) $digits;
+        $this->coversInput = $digits;
+        $this->showCovers = false;
     }
 
     /**
-     * Takes the typed number as the sale's covers, zero included: an order laid
-     * for nobody is answered with a 0, not with a key of its own. An empty
-     * keypad is no answer at all and confirms nothing.
+     * The digits of what a keypad sent, at most $max of them. Everything else is
+     * dropped: the pad in the browser only ever sends digits, so anything else
+     * arriving here was not typed by a cashier.
      */
-    public function chooseCovers(): void
+    protected function digitsOf(string $input, int $max): string
     {
-        if ($this->coversInput === '') {
-            return;
-        }
-
-        $this->covers = (int) $this->coversInput;
-        $this->showCovers = false;
+        return substr(preg_replace('/\D/', '', $input) ?? '', 0, $max);
     }
 
     /**

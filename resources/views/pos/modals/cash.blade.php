@@ -27,8 +27,12 @@
                     </div>
                 </div>
 
+                {{-- Debounced, not live per character: typing 20,00 sent five
+                     renders of the whole till to reach a figure the cashier had
+                     not finished typing. The change is still worked out on the
+                     server, where the money is counted. --}}
                 <div class="mt-3 flex items-center gap-2">
-                    <input type="text" inputmode="decimal" wire:model.live="cashInput"
+                    <input type="text" inputmode="decimal" wire:model.live.debounce.400ms="cashInput"
                         class="h-12 w-full flex-1 rounded-lg border border-neutral-300 px-3 text-center text-lg tabular-nums dark:border-neutral-700 dark:bg-neutral-800">
                     <button type="button" wire:click="resetCash" title="Azzera importo" class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-neutral-300 text-red-600 dark:border-neutral-700">
                         <x-heroicon-o-trash class="h-5 w-5" />

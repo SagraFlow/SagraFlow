@@ -282,10 +282,8 @@ it('records the number of covers on the order', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '3')
-        ->call('chooseTable')
-        ->set('coversInput', '4')
-        ->call('chooseCovers')
+        ->call('chooseTable', '3')
+        ->call('chooseCovers', '4')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -307,10 +305,8 @@ it('adds the cover charge to the order total', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '3')
-        ->call('chooseTable')
-        ->set('coversInput', '2')
-        ->call('chooseCovers')
+        ->call('chooseTable', '3')
+        ->call('chooseCovers', '2')
         ->assertSee('Coperti')
         ->assertSee('€ 8,00') // 5,00 goods + 2 x 1,50 coperto
         ->call('startCash')
@@ -339,10 +335,8 @@ it('discounts the cover charge when the setting is enabled', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '1')
-        ->call('chooseTable')
-        ->set('coversInput', '1')
-        ->call('chooseCovers') // 1 cover → 2,00 coperto
+        ->call('chooseTable', '1')
+        ->call('chooseCovers', '1') // 1 cover → 2,00 coperto
         ->set('discountType', 'percentage')
         ->set('discountValue', 10)
         ->call('startCash')
@@ -366,8 +360,7 @@ it('does not add a cover charge when none is configured', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('coversInput', '1')
-        ->call('chooseCovers')
+        ->call('chooseCovers', '1')
         ->assertDontSee('Coperti (')
         ->call('choosePickup')
         ->call('startCash')
@@ -416,10 +409,8 @@ it('freezes the cover charge from when the sale started', function () {
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id) // freezes coperto at 1,00
-        ->set('tableInput', '1')
-        ->call('chooseTable')
-        ->set('coversInput', '1')
-        ->call('chooseCovers');
+        ->call('chooseTable', '1')
+        ->call('chooseCovers', '1');
 
     // Admin changes the coperto mid-sale.
     $settings->coverCharge = 300;
@@ -450,10 +441,8 @@ it('freezes the discount-on-cover choice from when the sale started', function (
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id) // freezes flag = true, coperto 2,00
-        ->set('tableInput', '1')
-        ->call('chooseTable')
-        ->set('coversInput', '1')
-        ->call('chooseCovers')
+        ->call('chooseTable', '1')
+        ->call('chooseCovers', '1')
         ->set('discountType', 'percentage')
         ->set('discountValue', 10);
 
@@ -534,8 +523,7 @@ it('clears the cart and the order details', function () {
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '5')
-        ->call('chooseTable')
+        ->call('chooseTable', '5')
         ->call('openClearCart')
         ->assertSet('showClearCart', true)
         ->call('clearCart');
@@ -555,10 +543,8 @@ it('offers the reset for details taken without any dish, so they cannot ride on'
     // The customer chose a table, then walked away: nothing was ever ordered.
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->set('tableInput', '5')
-        ->call('chooseTable')
-        ->set('coversInput', '4')
-        ->call('chooseCovers')
+        ->call('chooseTable', '5')
+        ->call('chooseCovers', '4')
         ->assertSee('Svuota')
         ->call('openClearCart')
         ->assertSet('showClearCart', true)
@@ -648,10 +634,8 @@ it('places a table order from checkout and confirms with the number', function (
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '7')
-        ->call('chooseTable')
-        ->set('coversInput', '2')
-        ->call('chooseCovers')
+        ->call('chooseTable', '7')
+        ->call('chooseCovers', '2')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -735,54 +719,38 @@ it('refuses to place the order even if the payment is forced through without a c
     expect(Order::count())->toBe(0);
 });
 
-it('builds the table number one key at a time', function () {
-    tillAwaitingServiceChoice()
-        ->call('openService')
-        ->call('pressTableDigit', 1)
-        ->call('pressTableDigit', 0)   // a zero after a digit is a ten
-        ->call('pressTableDigit', 4)
-        ->assertSet('tableInput', '104')
-        ->call('backspaceTable')
-        ->assertSet('tableInput', '10')
-        ->call('clearTable')
-        ->assertSet('tableInput', '');
-});
-
-it('takes a table numbered zero, and does not build an 04 out of it', function () {
+it('takes a table numbered zero, which some halls do use', function () {
     $component = tillAwaitingServiceChoice()
-        ->call('openService')
-        ->call('pressTableDigit', 0)
-        ->assertSet('tableInput', '0')
-        ->call('pressTableDigit', 4)   // replaces the zero rather than following it
-        ->assertSet('tableInput', '4')
-        ->call('clearTable')
-        ->call('pressTableDigit', 0)
-        ->call('chooseTable')
+        ->call('chooseTable', '0')
         ->assertSet('serviceType', 'table_service')
         ->assertSet('tableNumber', 0);
 
     $component->assertSee('Tavolo 0');
 });
 
-it('stops the table number at four digits, which is what the field holds', function () {
-    tillAwaitingServiceChoice()
-        ->call('openService')
-        ->call('pressTableDigit', 1)
-        ->call('pressTableDigit', 2)
-        ->call('pressTableDigit', 3)
-        ->call('pressTableDigit', 4)
-        ->call('pressTableDigit', 5)
-        ->assertSet('tableInput', '1234');
-});
-
-it('takes the typed number as the table, and needs a number to take', function () {
+it('keeps only the digits of what the keypad sends, and only as many as fit', function (string $sent, ?int $table) {
     $component = tillAwaitingServiceChoice()
         ->call('openService')
-        ->call('chooseTable')          // nothing typed: nothing chosen
+        ->call('chooseTable', $sent);
+
+    expect($component->get('tableNumber'))->toBe($table);
+})->with([
+    'a plain number' => ['12', 12],
+    'more digits than the field holds' => ['12345', 1234],
+    'digits buried in text' => ['1a2', 12],
+    'nothing typed' => ['', null],
+    'no digits at all' => ['abc', null],
+    'a leading zero, which is just a number' => ['04', 4],
+]);
+
+it('needs a number before it takes one, and stays open until it gets it', function () {
+    $component = tillAwaitingServiceChoice()
+        ->call('openService')
+        ->assertSee('Conferma tavolo')  // the keypad is on screen
+        ->call('chooseTable', '')       // nothing typed: nothing chosen
         ->assertSet('showService', true)
         ->assertSet('serviceType', null)
-        ->set('tableInput', '12')
-        ->call('chooseTable')
+        ->call('chooseTable', '12')
         ->assertSet('showService', false)
         ->assertSet('serviceType', 'table_service')
         ->assertSet('tableNumber', 12);
@@ -792,8 +760,7 @@ it('takes the typed number as the table, and needs a number to take', function (
 
 it('drops the table when the order becomes a pickup', function () {
     tillAwaitingServiceChoice()
-        ->set('tableInput', '12')
-        ->call('chooseTable')
+        ->call('chooseTable', '12')
         ->call('choosePickup')
         ->assertSet('serviceType', 'pickup')
         ->assertSet('tableNumber', null)
@@ -802,8 +769,7 @@ it('drops the table when the order becomes a pickup', function () {
 
 it('offers the chosen table back for correction, and starts empty on a pickup', function () {
     $component = tillAwaitingServiceChoice()
-        ->set('tableInput', '12')
-        ->call('chooseTable')
+        ->call('chooseTable', '12')
         ->call('openService')
         ->assertSet('tableInput', '12');
 
@@ -821,10 +787,8 @@ it('asks again for the next order once one is placed', function () {
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '7')
-        ->call('chooseTable')
-        ->set('coversInput', '4')
-        ->call('chooseCovers')
+        ->call('chooseTable', '7')
+        ->call('chooseCovers', '4')
         ->call('startCash')
         ->call('setExactCash')
         ->call('confirmCash')
@@ -1468,56 +1432,35 @@ it('charges nothing for an order laid for nobody', function () {
     $settings->coverCharge = 200;
     $settings->save();
 
-    // Zero is typed and confirmed like any other number: the choice is on the
-    // record and the coperto is not charged.
+    // Zero is confirmed like any other number: the choice is on the record and
+    // the coperto is not charged.
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('openCovers')
-        ->call('pressCoversDigit', 0)
-        ->assertSet('coversInput', '0')
-        ->call('chooseCovers')
+        ->call('chooseCovers', '0')
         ->assertSet('covers', 0)
         ->assertSet('showCovers', false);
 
     expect($component->instance()->coverTotal)->toBe(0);
 });
 
-it('builds the covers one key at a time', function () {
+it('keeps only the digits of the covers the keypad sends, and only as many as fit', function (string $sent, ?int $covers) {
     openDay();
     $register = CashRegister::factory()->create();
 
-    Livewire::test('pages::pos')
+    $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('openCovers')
-        ->call('pressCoversDigit', 0)   // a real answer, and the whole of it
-        ->assertSet('coversInput', '0')
-        ->call('pressCoversDigit', 1)   // so the next digit takes its place
-        ->call('pressCoversDigit', 2)
-        ->assertSet('coversInput', '12')
-        ->call('backspaceCovers')
-        ->assertSet('coversInput', '1')
-        ->call('clearCovers')
-        ->assertSet('coversInput', '')
-        ->call('chooseCovers')          // nothing typed: nothing chosen
-        ->assertSet('covers', null)
-        ->assertSet('showCovers', true);
-});
+        ->call('chooseCovers', $sent);
 
-it('stops the covers at three digits, more people than any hall seats', function () {
-    openDay();
-    $register = CashRegister::factory()->create();
-
-    Livewire::test('pages::pos')
-        ->call('selectRegister', $register->id)
-        ->call('openCovers')
-        ->call('pressCoversDigit', 9)
-        ->call('pressCoversDigit', 9)
-        ->call('pressCoversDigit', 9)
-        ->call('pressCoversDigit', 9)
-        ->assertSet('coversInput', '999')
-        ->call('chooseCovers')
-        ->assertSet('covers', 999);
-});
+    expect($component->get('covers'))->toBe($covers);
+})->with([
+    'a plain number' => ['4', 4],
+    'more digits than a hall seats' => ['9999', 999],
+    'digits buried in text' => ['1a2', 12],
+    'nothing typed' => ['', null],
+    'no digits at all' => ['abc', null],
+]);
 
 it('asks for the covers as soon as a table is laid', function () {
     openDay();
@@ -1525,17 +1468,15 @@ it('asks for the covers as soon as a table is laid', function () {
 
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->set('tableInput', '7')
-        ->call('chooseTable')
+        ->call('chooseTable', '7')
         ->assertSet('showService', false)
         ->assertSet('showCovers', true)
-        ->call('pressCoversDigit', 0)
-        ->call('chooseCovers');
+        ->assertSee('Conferma coperti')  // its keypad is on screen
+        ->call('chooseCovers', '0');
 
     // Correcting the table later leaves a settled choice alone.
     $component->call('openService')
-        ->set('tableInput', '8')
-        ->call('chooseTable')
+        ->call('chooseTable', '8')
         ->assertSet('showCovers', false)
         ->assertSet('covers', 0);
 });
@@ -1546,8 +1487,7 @@ it('settles the covers at nobody when the order is a pickup', function () {
 
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->set('coversInput', '4')
-        ->call('chooseCovers')
+        ->call('chooseCovers', '4')
         ->call('choosePickup')
         ->assertSet('covers', 0)
         ->assertSet('showCovers', false);
@@ -1559,19 +1499,15 @@ it('offers the chosen number back for correction, zero included', function () {
 
     $component = Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
-        ->set('coversInput', '4')
-        ->call('chooseCovers')
+        ->call('chooseCovers', '4')
         ->call('openCovers')
         ->assertSet('coversInput', '4');
 
-    // A zero on the pad is replaced by the next digit, not built upon.
-    $component->call('clearCovers')
-        ->call('pressCoversDigit', 0)
-        ->call('chooseCovers')
+    // Zero is offered back too: the pad opens on it and replaces it as soon as
+    // another digit is pressed.
+    $component->call('chooseCovers', '0')
         ->call('openCovers')
-        ->assertSet('coversInput', '0')
-        ->call('pressCoversDigit', 4)
-        ->assertSet('coversInput', '4');
+        ->assertSet('coversInput', '0');
 });
 
 it('opens the covers instead of taking money when nobody said how many', function (string $payment) {
@@ -1583,8 +1519,7 @@ it('opens the covers instead of taking money when nobody said how many', functio
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '3')
-        ->call('chooseTable')
+        ->call('chooseTable', '3')
         ->call('closeCovers')       // the cashier waves the question away
         ->call($payment)
         ->assertSet('showCovers', true)
@@ -1603,8 +1538,7 @@ it('refuses to place the order even if the payment is forced through without the
     Livewire::test('pages::pos')
         ->call('selectRegister', $register->id)
         ->call('addFood', $food->id)
-        ->set('tableInput', '3')
-        ->call('chooseTable')
+        ->call('chooseTable', '3')
         ->call('closeCovers')
         ->call('setExactCash')
         ->call('confirmCash')
