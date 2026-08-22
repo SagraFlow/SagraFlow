@@ -84,12 +84,15 @@ it('fails instead of half-printing when the printer stops taking data', function
     fclose($server);
 })->throws(PrinterException::class, 'interrotto dopo');
 
-it('reports a reachable but silent printer as offline', function () {
+it('does not call a reachable but silent printer offline, because it is busy', function () {
     [$server, $port] = fakePrinter();
 
+    // What a printer working through thirty pickup stubs sounds like: nothing.
+    // Announcing that as offline cried wolf in the middle of every long print.
     $status = connection()->probe('127.0.0.1', $port, readTimeoutMs: 50);
 
-    expect($status)->toBe(PrinterStatus::Offline);
+    expect($status)->toBe(PrinterStatus::Unknown)
+        ->and($status->canPrint())->toBeTrue();
 
     fclose($server);
 });

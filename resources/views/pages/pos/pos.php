@@ -1962,11 +1962,15 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
             return;
         }
 
-        // Printing must never roll back a placed order: queue it, swallow setup errors.
+        // Printing must never roll back a placed order: queue it, swallow setup
+        // errors. But it must not fail quietly either - an order whose documents
+        // were never even queued leaves nothing behind for the health badge to
+        // count, so the one person standing there gets told.
         try {
             app(OrderPrinter::class)->print($order);
         } catch (Throwable $e) {
             report($e);
+            $this->dispatch('pos-notice', message: 'Ordine registrato ma stampa non avviata: controlla il pannello.');
         }
 
         // Tie the payment attempt to the order it paid for: from here on the two

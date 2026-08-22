@@ -13,5 +13,7 @@ it('parses the DLE EOT status bytes into a printer status', function (array $byt
     'mechanical error' => [[1 => 0x1A, 2 => 0x40, 4 => 0x12], PrinterStatus::Error],
     'offline without a specific cause' => [[1 => 0x1A, 2 => 0x12, 4 => 0x12], PrinterStatus::Error],
     'paper wins over cover' => [[1 => 0x1A, 2 => 0x24, 4 => 0x12], PrinterStatus::PaperOut],
-    'no reply at all (offline/error on a compliant printer)' => [[1 => null, 2 => null, 4 => null], PrinterStatus::Offline],
+    // Silence is not trouble: a printer working through a full receive buffer
+    // answers nothing, and one that is really in trouble says what is wrong.
+    'no reply at all (busy, or never asked before)' => [[1 => null, 2 => null, 4 => null], PrinterStatus::Unknown],
 ]);

@@ -39,7 +39,10 @@ return [
     */
 
     'reconcile' => [
-        'stale_seconds' => (int) env('PRINT_RECONCILE_STALE_SECONDS', 120),
+        // Thirty seconds is long enough that a send in flight is never reclaimed
+        // (a whole order goes over the wire in about two) and short enough that a
+        // worker killed mid-print costs half a minute rather than two.
+        'stale_seconds' => (int) env('PRINT_RECONCILE_STALE_SECONDS', 30),
     ],
 
 ];

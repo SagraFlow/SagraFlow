@@ -487,7 +487,6 @@ it('marks the print job printed after a successful send to a ready printer', fun
     $printJob = pendingPrintJob();
 
     $session = Mockery::mock(PrinterSession::class);
-    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
     // The worker renders the document from the spec at send time.
     $session->shouldReceive('write')->once()->with(Mockery::type('string'));
 
@@ -506,8 +505,6 @@ it('sends every document for one printer over a single connection, in order', fu
 
     $writes = [];
     $session = Mockery::mock(PrinterSession::class);
-    // One status query for the batch, then the documents back to back.
-    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
     $session->shouldReceive('write')->times(3)->andReturnUsing(function (string $data) use (&$writes): void {
         $writes[] = $data;
     });
@@ -521,37 +518,10 @@ it('sends every document for one printer over a single connection, in order', fu
         ->and($writes[1])->not->toContain('TOTALE');
 });
 
-it('asks a silent printer again before parking the batch, since it is usually mid-document', function () {
-    $printJob = pendingPrintJob();
-
-    $session = Mockery::mock(PrinterSession::class);
-    // Busy printing the previous order, then free.
-    $session->shouldReceive('status')->twice()->andReturn(PrinterStatus::Offline, PrinterStatus::Ready);
-    $session->shouldReceive('write')->once();
-
-    sendBatch(connectionTo($session), $printJob);
-
-    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Printed);
-});
-
-it('holds the print job and never sends when the printer is not ready', function () {
-    $printJob = pendingPrintJob();
-
-    $session = Mockery::mock(PrinterSession::class);
-    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::PaperOut);
-    $session->shouldReceive('write')->never();
-
-    sendBatch(connectionTo($session), $printJob);
-
-    expect($printJob->fresh()->status)->toBe(PrintJobStatus::Held)
-        ->and($printJob->printer->fresh()->status)->toBe(PrinterStatus::PaperOut);
-});
-
 it('parks the job as held when the send fails, so a print is never lost', function () {
     $printJob = pendingPrintJob();
 
     $session = Mockery::mock(PrinterSession::class);
-    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
     $session->shouldReceive('write')->once()->andThrow(new PrinterException('Stampante offline'));
 
     sendBatch(connectionTo($session), $printJob);
@@ -565,7 +535,6 @@ it('holds the rest of the batch when a send breaks down halfway', function () {
     $second = pendingPrintJob(printer: $printer);
 
     $session = Mockery::mock(PrinterSession::class);
-    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
     $session->shouldReceive('write')->once()->andReturnUsing(function (): void {
         // The first document goes out, then the printer disappears.
     });
@@ -577,38 +546,41 @@ it('holds the rest of the batch when a send breaks down halfway', function () {
         ->and($second->fresh()->status)->toBe(PrintJobStatus::Held);
 });
 
-it('hands a very long order over in runs, so no run outlives its own timeout', function () {
+it('hands even a thirty-portion order over in one run, whole', function () {
     $printer = Printer::factory()->create();
-    $printJobs = collect(range(1, 27))->map(fn (): PrintJob => pendingPrintJob(printer: $printer));
+    $printJobs = collect(range(1, 31))->map(fn (): PrintJob => pendingPrintJob(printer: $printer));
 
     $session = Mockery::mock(PrinterSession::class);
-    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
-    $session->shouldReceive('write')->times(25);
+    $session->shouldReceive('write')->times(31);
 
     Queue::fake();
-    sendBatch(connectionTo($session), ...$printJobs->all());
+    sendBatch(connectionTo($session, sessions: 1), ...$printJobs->all());
 
-    // Twenty-five out, the last two passed on to a run of their own, in order.
-    expect(PrintJob::where('status', PrintJobStatus::Printed)->count())->toBe(25);
-    Queue::assertPushed(fn (SendToPrinterJob $job): bool => $job->printJobIds === $printJobs->slice(25)->pluck('id')->all());
+    // Nothing split off to queue again behind another order: an order of this
+    // size went over the wire in two seconds on the real printer.
+    expect(PrintJob::where('status', PrintJobStatus::Printed)->count())->toBe(31);
+    Queue::assertNothingPushed();
 });
 
-it('reads the printer once for the whole batch, not between its documents', function () {
+it('asks the printer nothing: opening the connection is the only question', function () {
     $printer = Printer::factory()->create();
     $first = pendingPrintJob(printer: $printer);
     $second = pendingPrintJob(printer: $printer);
-    $third = pendingPrintJob(printer: $printer);
 
-    // The whole order goes over in about a second and the printer finishes it
-    // from its own buffer even if the roll runs out, so asking again between the
-    // documents buys nothing: one question, three documents.
+    // A printer with a full buffer answers no status query, and one that is out
+    // of paper keeps what it was handed and prints it when the roll is back. So
+    // the send stopped asking: it writes, and only a connection that will not
+    // open means trouble.
     $session = Mockery::mock(PrinterSession::class);
-    $session->shouldReceive('status')->once()->andReturn(PrinterStatus::Ready);
-    $session->shouldReceive('write')->times(3);
+    $session->shouldReceive('status')->never();
+    $session->shouldReceive('write')->times(2);
 
-    sendBatch(connectionTo($session), $first, $second, $third);
+    sendBatch(connectionTo($session), $first, $second);
 
-    expect(PrintJob::whereIn('id', [$first->id, $second->id, $third->id])->where('status', PrintJobStatus::Printed)->count())->toBe(3);
+    expect(PrintJob::whereIn('id', [$first->id, $second->id])->where('status', PrintJobStatus::Printed)->count())->toBe(2)
+        // And the send passes no judgement on the printer's health: that is the
+        // health poll's job, in one place.
+        ->and($printer->fresh()->status)->toBe(PrinterStatus::Unknown);
 });
 
 it('leaves the batch queued when another process holds the printer', function () {

@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\PollPrinterHealth;
 use App\Enums\PrinterStatus;
 use App\Enums\PrintJobStatus;
 use App\Enums\PrintJobType;
@@ -17,6 +18,7 @@ use App\Printing\PrinterConnection;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
@@ -25,6 +27,9 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     $this->actingAs(User::factory()->create());
     Filament::setCurrentPanel(Filament::getPanel('admin'));
+    // The health poll has just run: the normal state during service, and the
+    // baseline every other assertion here is made against.
+    Cache::put(PollPrinterHealth::HEARTBEAT_KEY, now()->toIso8601String(), now()->addDay());
 });
 
 function jobForPrinter(Printer $printer, PrintJobStatus $status): PrintJob
@@ -75,6 +80,69 @@ it('names the register printer first and counts the other broken ones', function
     // are a count.
     Livewire::test('pos.printer-badge', ['cashRegisterId' => $register->id])
         ->assertSee('Zeta Cassa: offline +2');
+});
+
+it('tells the cashier about a print given up on, loudly', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['name' => 'Cassa 1', 'status' => PrinterStatus::Ready]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+
+    // Nothing retries this one: a comanda the kitchen will never get unless
+    // somebody asks for it again, and the cashier is the only one standing there.
+    jobForPrinter($printer, PrintJobStatus::Failed);
+
+    Livewire::test('pos.printer-badge', ['cashRegisterId' => $register->id])
+        ->assertSee('1 stampa non riuscita')
+        ->assertSee('pos-alert-pulse')
+        ->call('openIssues')
+        ->assertSee('non riuscite');
+});
+
+it('tells the cashier when the queue has stopped moving', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['status' => PrinterStatus::Ready]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+
+    // Queued and still there: with the workers down this is the only trace, and
+    // without it the till would go on taking orders that print nowhere.
+    $stuck = jobForPrinter($printer, PrintJobStatus::Pending);
+    $stuck->update(['queued_at' => now()->subMinute()]);
+
+    Livewire::test('pos.printer-badge', ['cashRegisterId' => $register->id])
+        ->assertSee('1 stampa ferma')
+        ->assertSee('pos-alert-pulse');
+});
+
+it('says nothing about a document queued a moment ago', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['status' => PrinterStatus::Ready]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+
+    // A second old is what every document looks like on its way out.
+    jobForPrinter($printer, PrintJobStatus::Pending)->update(['queued_at' => now()]);
+
+    Livewire::test('pos.printer-badge', ['cashRegisterId' => $register->id])
+        ->assertDontSee('ferma')
+        ->assertDontSee('pos-alert-pulse');
+});
+
+it('says when nobody is watching the printers any more', function () {
+    $day = EventDay::factory()->create();
+    $day->open(User::factory()->create());
+    $printer = Printer::factory()->create(['status' => PrinterStatus::Ready]);
+    $register = CashRegister::factory()->create(['printer_id' => $printer->id]);
+
+    // The schedule has stopped: prints may still be coming out, but nothing
+    // recovers on its own any more, and that has to be visible.
+    Cache::forget(PollPrinterHealth::HEARTBEAT_KEY);
+
+    Livewire::test('pos.printer-badge', ['cashRegisterId' => $register->id])
+        ->assertSee('monitoraggio fermo')
+        ->call('openIssues')
+        ->assertSee('Monitoraggio fermo');
 });
 
 it('shows no printer badge when everything is ready', function () {

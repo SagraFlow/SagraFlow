@@ -28,9 +28,18 @@ use Throwable;
  * and any comanda for the same printer leave back to back, so the cashier is
  * not waiting on a queue round trip between one sheet and the next. The bytes
  * are rendered at send time from the PrintJob rows (the source of truth); the
- * queue only carries their ids. A printer that is not ready parks the batch as
- * Held for the health poll / reconciler to release, so a print is never
- * silently lost.
+ * queue only carries their ids.
+ *
+ * It opens, writes everything, and closes - and asks the printer nothing. That
+ * is not laziness, it is what the printer taught us: a whole order goes over in
+ * a couple of seconds and comes out even if the roll empties halfway (it prints
+ * the rest when the paper is back) or the cable is pulled (it prints from its
+ * own buffer). Meanwhile a printer whose buffer is full stops answering status
+ * queries altogether, so reading anything into that silence only ever produced
+ * false alarms and prints parked for a quarter of a minute. The one signal that
+ * means "this cannot print" is a connection that will not open, and that parks
+ * the batch as Held for the health poll to release. Judging the printer's health
+ * is the poll's job, in one place, for the people at the counter.
  */
 class SendToPrinterJob implements ShouldQueue
 {
@@ -44,20 +53,6 @@ class SendToPrinterJob implements ShouldQueue
 
     /** Statuses a document can still be sent from. */
     private const SENDABLE = [PrintJobStatus::Pending, PrintJobStatus::Held];
-
-    /**
-     * Documents one run hands over before passing the rest on. Measured at about
-     * a second of paper each (a receipt with a logo plus twenty pickup stubs took
-     * nineteen), so this leaves a run at well under half its own timeout, and an
-     * order of twenty portions still prints as one uninterrupted set.
-     */
-    private const BATCH_LIMIT = 25;
-
-    /** Status queries before giving up on a printer that answers nothing. */
-    private const READY_ATTEMPTS = 3;
-
-    /** Pause between them: a printer mid-document answers again as soon as it drains. */
-    private const READY_WAIT_MS = 400;
 
     /**
      * @param  array<int, int>  $printJobIds  the documents to transmit, in print order
@@ -128,54 +123,24 @@ class SendToPrinterJob implements ShouldQueue
             return; // already printed, cancelled, or claimed by another worker
         }
 
-        // A printer takes about a second per document, so a very long order
-        // would outlive this job's own timeout and have its tail recorded as
-        // failed - a reprint somebody has to notice and ask for. Instead a run
-        // takes what it can finish and passes the rest to a job of its own,
-        // which also lets another till's receipt in between the two.
-        $batch = $printJobs->take(self::BATCH_LIMIT);
-        $rest = $printJobs->slice(self::BATCH_LIMIT)->values();
-
         // One printer, one talker: a health probe must not steal the socket.
-        $ran = $lock->run($printer->id, fn () => $this->transmit($connection, $documents, $printer, $batch));
-
-        if (! $ran) {
+        // The whole order goes over in one run, however long it is - thirty-one
+        // documents took two seconds - so nothing is split and nothing has to
+        // queue again behind another order.
+        if (! $lock->run($printer->id, fn () => $this->transmit($connection, $documents, $printer, $printJobs))) {
             $this->release(1);
-
-            return;
-        }
-
-        if ($rest->isNotEmpty()) {
-            self::dispatchForAll($rest);
         }
     }
 
     /**
      * Sends every document of the batch over one connection, marking each one
-     * printed as it goes.
+     * printed as it goes. The printer is asked nothing: opening the connection
+     * is the only question worth asking, and writing is the answer.
      */
     private function transmit(PrinterConnection $connection, DocumentFactory $documents, Printer $printer, Collection $printJobs): void
     {
         try {
-            $connection->session($printer->ip_address, $printer->port, function (PrinterSession $session) use ($documents, $printer, $printJobs): void {
-                $status = $this->readiness($session);
-                $printer->recordStatus($status, $status->canPrint() ? null : $status->getLabel());
-
-                if (! $status->canPrint()) {
-                    $this->hold($printJobs, 'Stampante non pronta: '.$status->getLabel());
-
-                    return;
-                }
-
-                // The state is read once, before the first document, and not
-                // again between them: a whole order goes into the printer in
-                // about a second, and it then prints for as long as the paper
-                // takes. So there is barely a window in which asking again could
-                // learn anything - and nothing to gain if it did, because a
-                // document already handed over survives the roll running out and
-                // comes out complete when it is replaced. Measured, not assumed:
-                // thirty-one documents went over in two seconds, and a batch
-                // interrupted by an empty roll printed once and whole.
+            $connection->session($printer->ip_address, $printer->port, function (PrinterSession $session) use ($documents, $printJobs): void {
                 foreach ($printJobs as $printJob) {
                     if (! $this->claim($printJob)) {
                         continue;
@@ -196,25 +161,6 @@ class SendToPrinterJob implements ShouldQueue
             $printer->recordStatus(PrinterStatus::Offline, $exception->getMessage());
             $this->hold($printJobs, $exception->getMessage());
         }
-    }
-
-    /**
-     * The printer's state at the start of a batch. A printer that stays silent
-     * is usually still working through the previous order, and the open socket
-     * proves it is reachable: ask again a couple of times rather than parking
-     * the batch until the next health poll.
-     */
-    private function readiness(PrinterSession $session): PrinterStatus
-    {
-        $status = $session->status();
-
-        for ($attempt = 1; $attempt < self::READY_ATTEMPTS && $status === PrinterStatus::Offline; $attempt++) {
-            usleep(self::READY_WAIT_MS * 1000);
-
-            $status = $session->status();
-        }
-
-        return $status;
     }
 
     /**

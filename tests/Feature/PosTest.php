@@ -10,6 +10,7 @@ use App\Models\Ingredient;
 use App\Models\Order;
 use App\Models\StockReservation;
 use App\Models\User;
+use App\Printing\OrderPrinter;
 use App\Settings\EventSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -651,6 +652,38 @@ it('places a table order from checkout and confirms with the number', function (
         ->and($order->payment_method)->toBe(PaymentMethod::Cash)
         ->and($order->total)->toBe(1000)
         ->and($order->lines)->toHaveCount(1);
+});
+
+it('keeps the order but says so when printing could not even be started', function () {
+    openDay();
+    $register = CashRegister::factory()->create();
+    $category = Category::factory()->create();
+    $food = Food::factory()->create(['category_id' => $category->id, 'price' => 500]);
+
+    // Whatever went wrong, the money was taken and the order stands - but an
+    // order whose documents were never queued leaves nothing behind for the
+    // printer badge to count, so the one person there has to be told.
+    app()->instance(OrderPrinter::class, new class extends OrderPrinter
+    {
+        public function __construct() {}
+
+        public function print(Order $order): void
+        {
+            throw new RuntimeException('rotta di stampa rotta');
+        }
+    });
+
+    Livewire::test('pages::pos')
+        ->call('selectRegister', $register->id)
+        ->call('addFood', $food->id)
+        ->call('choosePickup')
+        ->call('startCash')
+        ->call('setExactCash')
+        ->call('confirmCash')
+        ->assertHasNoErrors()
+        ->assertDispatched('pos-notice');
+
+    expect(Order::count())->toBe(1);
 });
 
 it('places a pickup order when the pickup key is pressed', function () {

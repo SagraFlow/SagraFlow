@@ -8,6 +8,7 @@ use App\Printing\PrinterConnection;
 use App\Printing\PrinterLock;
 use App\Printing\PrinterQueue;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Probes every active printer's status, records it, alerts on problems, and
@@ -16,6 +17,9 @@ use Illuminate\Console\Command;
  */
 class PollPrinterHealth extends Command
 {
+    /** Where each run leaves its mark, so the till can see that someone is watching. */
+    public const HEARTBEAT_KEY = 'printers:poll:last-run';
+
     protected $signature = 'printers:poll';
 
     protected $description = 'Probe active printers, update health, alert and release held jobs.';
@@ -46,6 +50,13 @@ class PollPrinterHealth extends Command
                 $queue->release($printer);
             }
         }
+
+        // A mark only this command writes. printers.last_checked_at cannot serve
+        // as one: a print updates it too, so during service a till printing away
+        // would look watched even with nothing watching. Everything that recovers
+        // a stuck print hangs off this schedule, so its silence has to be visible
+        // at the counter.
+        Cache::put(self::HEARTBEAT_KEY, now()->toIso8601String(), now()->addDay());
 
         return self::SUCCESS;
     }

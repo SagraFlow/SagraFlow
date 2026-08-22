@@ -22,7 +22,10 @@ enum PrinterStatus: string implements HasColor, HasLabel
     /** Unreachable (powered off, unplugged, network down). */
     case Offline = 'offline';
 
-    /** Never probed yet (initial state before the first health poll). */
+    /**
+     * Reachable but saying nothing: never probed yet, or busy with a full
+     * receive buffer, which silences a printer exactly as an error would.
+     */
     case Unknown = 'unknown';
 
     public function getLabel(): string

@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\PollPrinterHealth;
 use App\Enums\PrinterStatus;
 use App\Enums\PrintJobStatus;
 use App\Enums\PrintJobType;
@@ -38,6 +39,19 @@ function fakeProbe(PrinterStatus $status): void
         $mock->shouldReceive('probe')->andReturn($status);
     });
 }
+
+it('leaves a mark of its own, so a stopped poll is not mistaken for a quiet one', function () {
+    Printer::factory()->create();
+    fakeProbe(PrinterStatus::Ready);
+
+    Cache::forget(PollPrinterHealth::HEARTBEAT_KEY);
+
+    test()->artisan('printers:poll')->assertSuccessful();
+
+    // Not printers.last_checked_at: a print updates that too, so a busy till
+    // would look watched with nothing watching it.
+    expect(Cache::get(PollPrinterHealth::HEARTBEAT_KEY))->not->toBeNull();
+});
 
 it('records the probed status on each active printer', function () {
     $printer = Printer::factory()->create();

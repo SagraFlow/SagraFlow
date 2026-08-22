@@ -33,12 +33,18 @@ class PrinterStatusParser
         $offlineCause = $bytes[2] ?? null;
         $paper = $bytes[4] ?? null;
 
-        // No reply to any query. On a (compliant) Epson printer, real-time
-        // status is answered whenever the printer is reachable and readable, so
-        // silence means it is offline / in an error state - treat it as Offline
-        // (not printable) rather than optimistically assuming it is fine.
+        // No reply to any query, which is not the same as being offline: a
+        // printer whose receive buffer is full stops answering even the
+        // real-time queries, and that is what a printer working through an order
+        // of thirty pickup stubs looks like. Reading trouble into that silence
+        // announced a healthy printer as offline in the middle of every long
+        // print. A printer that is really in trouble says so (it needs memory
+        // switch Msw1-3 on, which the panel checks and sets), and one that is
+        // switched off or unplugged refuses the connection instead. So silence
+        // is Unknown: nothing to alert about, and printable - because the bytes
+        // sit in the buffer and come out as soon as the paper moves again.
         if ($printer === null && $offlineCause === null && $paper === null) {
-            return PrinterStatus::Offline;
+            return PrinterStatus::Unknown;
         }
 
         if (($paper !== null && ($paper & self::PAPER_END) === self::PAPER_END)

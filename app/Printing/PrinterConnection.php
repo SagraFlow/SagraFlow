@@ -46,10 +46,12 @@ class PrinterConnection
     }
 
     /**
-     * Probes the printer's readiness via the ESC/POS real-time status queries.
-     * Returns Offline when unreachable OR reachable but silent (a compliant
-     * Epson printer answers whenever it is readable, so silence means offline /
-     * in error), and a concrete state (Ready/PaperOut/CoverOpen/Error) otherwise.
+     * Probes the printer's state via the ESC/POS real-time status queries.
+     * Offline means exactly one thing here: the connection would not open, so
+     * the printer is switched off, unplugged, or gone from the network. A
+     * printer that answers reports its real state (Ready/PaperOut/CoverOpen/
+     * Error); one that answers nothing is Unknown, because a full receive buffer
+     * silences it just as an error would.
      */
     public function probe(string $host, int $port, int $connectTimeout = 2, int $readTimeoutMs = 300): PrinterStatus
     {
