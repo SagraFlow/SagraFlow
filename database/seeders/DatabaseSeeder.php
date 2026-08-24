@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -17,9 +18,12 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
+        // Said out loud: a fresh install needs one account that can open the
+        // panel, or there is nowhere to create the others from.
         User::factory()->create([
             'name' => 'Test User',
             'email' => 'test@example.com',
+            'role' => UserRole::Administrator,
         ]);
 
         $this->call(DemoSeeder::class);

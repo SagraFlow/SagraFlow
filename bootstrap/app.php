@@ -4,7 +4,9 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -41,4 +43,19 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+
+        // A till account that lands in the panel is taken to the till instead of
+        // being met by a forbidden page. That is the path a cashier walks every
+        // time the tablet is logged out, because the sign-in form is the panel's
+        // own. Handled here rather than with middleware: what runs before the
+        // panel's guard is decided by the framework's priority list, not by the
+        // order of the panel's middleware array, and anything unknown to that
+        // list runs last - after the guard has already refused.
+        $exceptions->render(function (HttpExceptionInterface $e, Request $request): ?RedirectResponse {
+            $user = $request->user();
+
+            return $e->getStatusCode() === 403 && $request->routeIs('filament.*') && $user !== null && ! $user->isAdministrator()
+                ? redirect()->route('pos')
+                : null;
+        });
     })->create();

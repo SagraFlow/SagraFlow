@@ -3,6 +3,7 @@
 namespace App\Printing;
 
 use App\Enums\PrinterStatus;
+use App\Enums\UserRole;
 use App\Models\Printer;
 use App\Models\User;
 use Filament\Notifications\Notification;
@@ -58,7 +59,10 @@ class PrinterAlerts
             return;
         }
 
-        $recipients = User::all();
+        // Administrators only: these land in the panel's bell, and a till account
+        // cannot open the panel. What the cashier needs is on the badge in the
+        // till header, which reads the printers directly.
+        $recipients = User::query()->where('role', UserRole::Administrator)->get();
 
         if ($recipients->isEmpty()) {
             return;
