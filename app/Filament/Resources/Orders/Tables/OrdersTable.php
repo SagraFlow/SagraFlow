@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Orders\Tables;
 use App\Enums\PaymentMethod;
 use App\Enums\ServiceType;
 use App\Filament\Tables\Columns\MoneyColumn;
+use App\Models\EventDay;
 use App\Models\Order;
 use App\Printing\OrderPrinter;
 use Filament\Actions\Action;
@@ -12,6 +13,7 @@ use Filament\Actions\ViewAction;
 use Filament\Notifications\Notification;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -54,12 +56,33 @@ class OrdersTable
                     ->badge(),
                 MoneyColumn::make('total')
                     ->label('Totale')
-                    ->sortable(),
+                    ->sortable()
+                    // Sums what the filters have selected, so a day plus a
+                    // payment method is the figure the drawer is counted
+                    // against - and a till on top of those two is what that
+                    // one cashier counts.
+                    ->summarize(
+                        Sum::make()
+                            ->label('Incassato')
+                            ->formatStateUsing(fn (mixed $state): string => (string) MoneyColumn::euro((int) round((float) $state))),
+                    ),
             ])
             ->filters([
                 SelectFilter::make('event_day_id')
                     ->label('Giornata')
-                    ->relationship('eventDay', 'date'),
+                    // The same name the day carries everywhere else ("22/08/2026
+                    // (Sabato)"): a bare date in the filter and a labelled day in
+                    // the column read like two different things.
+                    ->options(fn (): array => EventDay::query()
+                        ->orderByDesc('date')
+                        ->get()
+                        ->mapWithKeys(fn (EventDay $day): array => [$day->id => $day->display_name])
+                        ->all()),
+                SelectFilter::make('cash_register_id')
+                    ->label('Cassa')
+                    // Every register, disabled ones included: an order stays on
+                    // the till that took it long after that till is retired.
+                    ->relationship('cashRegister', 'name'),
                 SelectFilter::make('service_type')
                     ->label('Servizio')
                     ->options(ServiceType::class),

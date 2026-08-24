@@ -10,10 +10,19 @@ use Filament\Tables\Columns\TextColumn;
  */
 class MoneyColumn extends TextColumn
 {
+    /**
+     * Cents as the panel writes money. Public so a column footer that sums the
+     * same cents reads exactly like the column above it.
+     */
+    public static function euro(?int $cents): ?string
+    {
+        return $cents !== null ? '€ '.number_format($cents / 100, 2, '.', '') : null;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->formatStateUsing(fn (?int $state): ?string => $state !== null ? '€ '.number_format($state / 100, 2, '.', '') : null);
+        $this->formatStateUsing(fn (?int $state): ?string => self::euro($state));
     }
 }

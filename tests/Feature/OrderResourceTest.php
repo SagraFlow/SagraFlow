@@ -62,6 +62,39 @@ it('lists the orders', function () {
         ->assertSee('Cassa 1');   // register column
 });
 
+it('totals what the filters have selected, which is what closes the till', function () {
+    $day = EventDay::factory()->create();
+    $register = CashRegister::factory()->create(['name' => 'Cassa 1']);
+    $other = CashRegister::factory()->create(['name' => 'Cassa 2']);
+    $food = Food::factory()->create(['name' => 'Panino']);
+
+    $line = fn (): array => [['food_id' => $food->id, 'food_name' => 'Panino', 'unit_price' => 1000, 'quantity' => 1, 'note' => null, 'ingredients' => []]];
+
+    Order::place($day, $register, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, $line());
+    Order::place($day, $register, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, $line());
+    Order::place($day, $other, null, ServiceType::Pickup, null, null, PaymentMethod::Cash, $line());
+
+    // Everything: three tenners.
+    Livewire::test(ListOrders::class)->assertSee('€ 30.00');
+
+    // One till at a time is what that till's cashier counts against their drawer.
+    Livewire::test(ListOrders::class)
+        ->filterTable('cash_register_id', $register->id)
+        ->assertSee('€ 20.00');
+});
+
+it('names the days in the filter the way the rest of the app does', function () {
+    $day = EventDay::factory()->create(['label' => 'Sabato']);
+    placedOrder();
+
+    // The label must be there and the raw date must not: the day's name already
+    // appears in the column, so only the absence of "2026-08-22" tells the
+    // filter apart from the one that listed bare dates.
+    Livewire::test(ListOrders::class)
+        ->assertSee($day->display_name)
+        ->assertDontSee($day->date->format('Y-m-d'));
+});
+
 it('exposes a read-only view action that opens the detail modal', function () {
     $order = placedOrder();
 
