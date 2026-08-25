@@ -80,7 +80,9 @@ jobs:
         needs: build
         runs-on: ubuntu-24.04
         permissions:
-            contents: read
+            # contents: write to leave the release notes behind; packages: write
+            # to put the tags on the manifest.
+            contents: write
             packages: write
         steps:
             - uses: actions/download-artifact@v4
@@ -113,3 +115,25 @@ jobs:
                       docker buildx imagetools inspect "${IMAGE}:${GITHUB_REF_NAME}"
                       echo '```'
                   } >> "$GITHUB_STEP_SUMMARY"
+
+            # Last, and only once the image is really there: a release that
+            # points at an image that failed to publish would be a lie. The notes
+            # are generated from the commits since the previous release, which is
+            # where "read what changed before updating" is meant to be read.
+            #
+            # Notes written by hand win. A release already on the tag is left
+            # exactly as it is - and this step does not turn a published image
+            # into a red workflow over it.
+            - name: Publish the release notes
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                      echo "The release notes were written by hand: leaving them alone." >> "$GITHUB_STEP_SUMMARY"
+                      exit 0
+                  fi
+
+                  gh release create "$GITHUB_REF_NAME" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --title "$GITHUB_REF_NAME" \
+                    --generate-notes
