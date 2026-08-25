@@ -13,6 +13,20 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+it('makes the first account an administrator, whoever asks for it', function () {
+    // Filament's own make:filament-user writes a name, an email and a password
+    // and knows nothing about roles: on a fresh install it would otherwise
+    // create a cashier, say "you may now log in", and leave the panel shut.
+    $first = User::create(['name' => 'Andrea', 'email' => 'andrea@sagra.test', 'password' => 'segretissima']);
+
+    expect($first->role)->toBe(UserRole::Administrator);
+
+    // Once one exists, the cautious default applies again.
+    $second = User::create(['name' => 'Cassa 1', 'email' => 'cassa1@sagra.test', 'password' => 'segretissima']);
+
+    expect($second->fresh()->role)->toBe(UserRole::Cashier);
+});
+
 it('closes the panel to a till account and opens it to an administrator', function () {
     $panel = Filament::getPanel('admin');
 

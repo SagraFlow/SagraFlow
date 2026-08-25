@@ -52,6 +52,17 @@ class User extends Authenticatable implements FilamentUser
 
     protected static function booted(): void
     {
+        // The first account runs the place. Without this, a fresh install set up
+        // with Filament's own make:filament-user - which writes a name, an email
+        // and a password, and knows nothing about roles - would create a cashier,
+        // announce that it may now log in, and leave the panel behind nobody. A
+        // role asked for explicitly is always respected.
+        static::creating(function (User $user): void {
+            if ($user->role === null && ! static::query()->where('role', UserRole::Administrator)->exists()) {
+                $user->role = UserRole::Administrator;
+            }
+        });
+
         // Guarded in the model rather than in the panel, so no path - a form, a
         // command, a tinker session - can leave the sagra with a panel nobody
         // can open.
