@@ -1,0 +1,91 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+    # Called by the release workflow, so a tag runs exactly the same suite
+    # instead of a copy of it that drifts.
+    workflow_call:
+
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    tests:
+        name: Tests
+        runs-on: ubuntu-24.04
+
+        # Set for the whole job, not just for the test step: .env is copied from
+        # .env.example, which points at the development containers by their
+        # compose service names, and nothing resolves those on a runner.
+        env:
+            DB_CONNECTION: pgsql
+            DB_HOST: 127.0.0.1
+            DB_PORT: 5432
+            DB_USERNAME: sagraflow
+            DB_PASSWORD: ci-only
+            REDIS_HOST: 127.0.0.1
+
+        services:
+            # The suite runs on Postgres, on the "testing" database phpunit.xml
+            # names, because the app does too: a sagra evening's numbers are
+            # summed by Postgres and nothing here is portable by accident.
+            pgsql:
+                image: postgres:18-alpine
+                env:
+                    POSTGRES_DB: testing
+                    POSTGRES_USER: sagraflow
+                    POSTGRES_PASSWORD: ci-only
+                ports: ['5432:5432']
+                options: >-
+                    --health-cmd "pg_isready -q -d testing -U sagraflow"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 10
+
+            valkey:
+                image: valkey/valkey:alpine
+                ports: ['6379:6379']
+                options: >-
+                    --health-cmd "valkey-cli ping"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 10
+
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.5'
+                  # The same extensions the image carries, for the same reasons:
+                  # gd renders the receipt logo, pcntl runs Horizon's workers.
+                  extensions: pdo_pgsql, redis, gd, intl, zip, pcntl
+                  coverage: none
+
+            - name: Install PHP dependencies
+              run: |
+                  composer install --no-interaction --no-progress --prefer-dist
+                  cp .env.example .env
+                  php artisan key:generate
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: npm
+
+            # Built, not skipped: without the Vite manifest the till's layout
+            # throws, and a test suite that never renders it would not notice.
+            - name: Build assets
+              run: |
+                  npm ci
+                  npm run build
+
+            - name: Check formatting
+              run: vendor/bin/pint --test
+
+            - name: Tests
+              run: php artisan test --compact

@@ -1,58 +1,148 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# SagraFlow
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A till for village food festivals. Tablets at the counter take the orders,
+department tickets come out on the kitchen and bar printers while the receipt
+comes out at the till, ingredient stock counts itself down, and card payments go
+through the terminal. Menu, prices, days, printers and accounts are kept from the
+panel.
 
-## About Laravel
+> **Public beta.** The `0.x` versions are in use but still moving: a new one can
+> change how something works and can add migrations that do not undo themselves.
+> Read what changed before updating, and never in the middle of an evening.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Development
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Docker is the only requirement. On a fresh clone `vendor/` does not exist yet, so
+Sail is not installed either - install the dependencies with a throwaway Composer
+container first, and Sail comes with them:
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+docker run --rm \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd):/app" \
+  -w /app \
+  composer:latest \
+  composer install --ignore-platform-reqs
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+`--ignore-platform-reqs` because that container has no `intl` or `pcntl`, which
+the containers that run the app do have. And it does not matter that it is not
+PHP 8.5: there is no Composer image for 8.5 yet, and `install` reads the versions
+out of `composer.lock` rather than resolving them again.
 
-## Contributing
+From here on, Sail:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+./vendor/bin/sail up -d
+./vendor/bin/sail composer setup     # .env, app key, migrations, assets
+./vendor/bin/sail npm run dev        # or: sail npm run build
+```
 
-## Code of Conduct
+The till is at <http://localhost/pos>, the panel at <http://localhost/admin>.
+Create the first account - it is an administrator, because the first one always
+is:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```bash
+./vendor/bin/sail artisan make:filament-user
+```
 
-## Security Vulnerabilities
+```bash
+./vendor/bin/sail artisan test --compact                       # the suite
+./vendor/bin/sail exec laravel.test vendor/bin/pint --dirty    # formatting
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Printing runs in the `horizon` container: after touching a job, restart it
+(`docker restart sagraflow-horizon-1`) or it keeps running the old code.
 
-## License
+## Production
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Docker is the only requirement. **The repository is not**: the code lives inside
+the published image, and the machine in the hall holds two files.
+
+### First time
+
+**1. An empty folder, and the compose file of the tag you mean to run.**
+
+```bash
+mkdir sagraflow && cd sagraflow
+curl -O https://raw.githubusercontent.com/SagraFlow/SagraFlow/v0.1.0/compose.prod.yaml
+curl -o .env https://raw.githubusercontent.com/SagraFlow/SagraFlow/v0.1.0/.env.production.example
+```
+
+Take them **from the tag you will run**: a compose file from another week can be
+out of step with the image and will not say so.
+
+**2. Fill in the one empty line of `.env`.** The key is generated by the image
+itself:
+
+```bash
+docker run --rm ghcr.io/sagraflow/sagraflow:v0.1.0 php artisan key:generate --show
+```
+
+That goes in `APP_KEY`. Then set `APP_URL` to the machine's address on the hall's
+network (`http://192.168.1.10`) rather than localhost: the tills are other
+devices.
+
+The database password is already filled in, and left that way deliberately: the
+compose file publishes no port for it, so it is reachable only from the other
+containers.
+
+**3. Start it.** Migrations run on start.
+
+```bash
+docker compose -f compose.prod.yaml up -d
+```
+
+**4. Create the first account.**
+
+```bash
+docker compose -f compose.prod.yaml exec app php artisan make:filament-user
+```
+
+The first account is an administrator. Sign in to the panel and create the till
+accounts from there: those reach the till and not the panel.
+
+**5. Set the sagra up from the panel**: printers, categories, dishes, print
+routes, key boards, cover charge, logo. Then open the day.
+
+### Every evening, after closing
+
+The backup. That volume holds the evening's takings and they exist nowhere else.
+
+```bash
+docker compose -f compose.prod.yaml exec -T pgsql \
+    pg_dump -U sagraflow sagraflow | gzip > ~/sagraflow-$(date +%Y%m%d-%H%M).sql.gz
+```
+
+Copy it **off the machine**: a stick, a drive, a synced folder.
+
+### Updating
+
+Change `SAGRAFLOW_TAG` in `.env`, take the compose file of that tag, and bring it
+up.
+
+```bash
+docker compose -f compose.prod.yaml pull
+docker compose -f compose.prod.yaml up -d
+```
+
+To go back, put the old tag back and repeat. Migrations do not undo themselves,
+so a step backwards is one to take knowing what changed.
+
+### The two things never to do
+
+- **Never `docker compose down -v`**: the `-v` removes the volumes, which means
+  the database. To stop everything, `down` or `stop` is enough.
+- **Never change `APP_KEY`** once the sagra has started: whatever was encrypted
+  with the old one becomes unreadable.
+
+### When something does not print
+
+```bash
+docker compose -f compose.prod.yaml logs -f app horizon scheduler
+docker compose -f compose.prod.yaml exec app php artisan printers:poll
+```
+
+The badge next to the till's name, at the top of the selling screen, always says
+what has not come out: a printer in trouble, prints waiting, prints given up on,
+or a monitoring that has stopped. If the badge is not there, nothing is pending.

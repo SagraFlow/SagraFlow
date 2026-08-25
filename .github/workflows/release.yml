@@ -1,0 +1,115 @@
+name: Release
+
+on:
+    push:
+        tags: ['v*']
+
+env:
+    IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+    # A tag that publishes a broken image is worse than no pipeline at all, so
+    # the suite runs first and nothing is pushed until it passes.
+    tests:
+        name: Tests
+        uses: ./.github/workflows/ci.yml
+
+    # One job per architecture, each on a runner of that architecture: the tills
+    # run on an arm64 laptop, and somebody else's machine will be x86. Building
+    # both natively takes minutes; building arm64 under emulation takes twenty.
+    build:
+        name: Build ${{ matrix.arch }}
+        needs: tests
+        runs-on: ${{ matrix.runner }}
+        permissions:
+            contents: read
+            packages: write
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - arch: amd64
+                      runner: ubuntu-24.04
+                    - arch: arm64
+                      runner: ubuntu-24.04-arm
+        steps:
+            - uses: actions/checkout@v5
+
+            - uses: docker/setup-buildx-action@v3
+
+            - uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            # Pushed by digest, without a tag: the tags go on the manifest that
+            # joins the two architectures, in the job below.
+            - name: Build and push by digest
+              id: build
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  platforms: linux/${{ matrix.arch }}
+                  provenance: false
+                  cache-from: type=gha,scope=${{ matrix.arch }}
+                  cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+                  outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+            # Handed over as a file rather than as a job output: a matrix job has
+            # one set of outputs and the two legs would overwrite each other.
+            - name: Leave the digest for the manifest
+              run: |
+                  mkdir -p /tmp/digests
+                  touch "/tmp/digests/${DIGEST#sha256:}"
+              env:
+                  DIGEST: ${{ steps.build.outputs.digest }}
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: digest-${{ matrix.arch }}
+                  path: /tmp/digests/*
+                  if-no-files-found: error
+                  retention-days: 1
+
+    # What a "multi-architecture image" actually is: one manifest list pointing at
+    # both builds and carrying the tags, so `docker pull` picks the right one
+    # without anybody having to know which machine they are on.
+    publish:
+        name: Publish the manifest
+        needs: build
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  pattern: digest-*
+                  merge-multiple: true
+                  path: /tmp/digests
+
+            - uses: docker/setup-buildx-action@v3
+
+            - uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Create and push the manifest
+              working-directory: /tmp/digests
+              run: |
+                  docker buildx imagetools create \
+                    --tag "${IMAGE}:${GITHUB_REF_NAME}" \
+                    --tag "${IMAGE}:latest" \
+                    $(printf "${IMAGE}@sha256:%s " *)
+
+            - name: Say what was published
+              run: |
+                  {
+                      echo "### \`${IMAGE}:${GITHUB_REF_NAME}\`"
+                      echo '```'
+                      docker buildx imagetools inspect "${IMAGE}:${GITHUB_REF_NAME}"
+                      echo '```'
+                  } >> "$GITHUB_STEP_SUMMARY"

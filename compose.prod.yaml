@@ -1,0 +1,119 @@
+# SagraFlow in production: on a machine in the hall, with nothing of the
+# repository on it. Copy this file and a .env into an empty folder and start it -
+# there is deliberately no build step and no source directory, because the code
+# lives inside the published image.
+#
+#   curl -O https://raw.githubusercontent.com/SagraFlow/SagraFlow/v0.1.0/compose.prod.yaml
+#
+# Take it from the tag you are running: a compose file from another day can be
+# missing a service or a variable and say nothing about it.
+#
+# The project name keeps this world apart from a development checkout on the same
+# machine: separate containers, separate volumes, separate database. The two
+# never meet.
+name: sagraflow-prod
+
+services:
+    # The till and the panel. The only container that migrates.
+    app:
+        image: 'ghcr.io/sagraflow/sagraflow:${SAGRAFLOW_TAG:-latest}'
+        restart: unless-stopped
+        env_file: .env
+        environment:
+            # The role decides what the entrypoint prepares: this is the one that
+            # migrates and links the public disk.
+            SAGRAFLOW_ROLE: web
+        ports:
+            # Port 80 by default: the tills reach this machine by address alone.
+            - '${APP_PORT:-80}:80'
+        volumes:
+            # Only what people upload - the receipt logo. Everything else the app
+            # writes is either in the database or on the container's own disk, so
+            # there is no volume to shadow the image's directories.
+            - 'storage:/app/storage/app/public'
+        depends_on:
+            pgsql:
+                condition: service_healthy
+            valkey:
+                condition: service_healthy
+
+    # Prints, card payments, and everything else that must not happen while a
+    # cashier waits.
+    horizon:
+        image: 'ghcr.io/sagraflow/sagraflow:${SAGRAFLOW_TAG:-latest}'
+        restart: unless-stopped
+        command: ['php', 'artisan', 'horizon']
+        env_file: .env
+        volumes:
+            - 'storage:/app/storage/app/public'
+        # The image's own check asks the web server whether it is alive, and this
+        # container has no web server: left alone it reports itself unhealthy
+        # while working perfectly, which is worse than no check at all. Horizon
+        # can answer for itself.
+        healthcheck:
+            test: ['CMD', 'php', 'artisan', 'horizon:status']
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 30s
+        depends_on:
+            app:
+                condition: service_started
+            pgsql:
+                condition: service_healthy
+            valkey:
+                condition: service_healthy
+
+    # The safety nets: the printer heartbeat every fifteen seconds and the
+    # reconcilers. Without this container a held print never comes out.
+    scheduler:
+        image: 'ghcr.io/sagraflow/sagraflow:${SAGRAFLOW_TAG:-latest}'
+        restart: unless-stopped
+        command: ['php', 'artisan', 'schedule:work']
+        env_file: .env
+        volumes:
+            - 'storage:/app/storage/app/public'
+        # Nothing to ask here - the scheduler answers no questions - so the
+        # image's web check is switched off rather than left to fail.
+        healthcheck:
+            disable: true
+        depends_on:
+            app:
+                condition: service_started
+            pgsql:
+                condition: service_healthy
+            valkey:
+                condition: service_healthy
+
+    # The evening's orders live here. This volume is the sagra's takings: back it
+    # up (see the README) and never `docker compose down -v`.
+    pgsql:
+        image: 'postgres:18-alpine'
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: '${DB_DATABASE}'
+            POSTGRES_USER: '${DB_USERNAME}'
+            POSTGRES_PASSWORD: '${DB_PASSWORD}'
+        volumes:
+            - 'db:/var/lib/postgresql'
+        healthcheck:
+            test: ['CMD', 'pg_isready', '-q', '-d', '${DB_DATABASE}', '-U', '${DB_USERNAME}']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    # Queues only. Nothing here needs to survive a restart: the print jobs are
+    # rows in the database, and the reconcilers put back what a lost message
+    # dropped.
+    valkey:
+        image: 'valkey/valkey:alpine'
+        restart: unless-stopped
+        healthcheck:
+            test: ['CMD', 'valkey-cli', 'ping']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+volumes:
+    db:
+    storage:

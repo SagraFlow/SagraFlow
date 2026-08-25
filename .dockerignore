@@ -1,0 +1,28 @@
+# Everything the image builds for itself, or must never carry.
+.git
+.github
+.idea
+.vscode
+node_modules
+vendor
+public/build
+public/hot
+public/storage
+storage/app/public/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/logs/*
+tests
+
+# The host's package discovery lists development packages that a --no-dev image
+# does not have: the vendor stage builds its own.
+bootstrap/cache/*
+compose.yaml
+compose.prod.yaml
+Dockerfile
+.dockerignore
+
+# Never bake an environment into an image: it is read at start, from the host.
+.env
+.env.*
