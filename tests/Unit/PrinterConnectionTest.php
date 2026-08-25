@@ -23,6 +23,21 @@ function fakePrinter(): array
     return [$server, (int) explode(':', stream_socket_get_name($server, false))[1]];
 }
 
+it('puts the error handler back exactly as it found it', function () {
+    // The transport silences PHP for the length of a socket call. If it ever
+    // failed to restore the handler afterwards, the application would go on with
+    // warnings swallowed - so this is the guard for that, not for the silence.
+    $before = set_error_handler(null);
+    restore_error_handler();
+
+    expect(fn () => connection()->send('127.0.0.1', 1, 'x', timeout: 1))->toThrow(PrinterException::class);
+
+    $after = set_error_handler(null);
+    restore_error_handler();
+
+    expect($after)->toBe($before);
+});
+
 it('transmits every document of a session over the same connection', function () {
     [$server, $port] = fakePrinter();
 

@@ -4,6 +4,7 @@ namespace App\Printing;
 
 use App\Enums\PrinterStatus;
 use App\Exceptions\PrinterException;
+use App\Printing\Concerns\QuietSockets;
 use Closure;
 
 /**
@@ -13,6 +14,8 @@ use Closure;
  */
 class PrinterConnection
 {
+    use QuietSockets;
+
     public function __construct(private PrinterStatusParser $parser) {}
 
     /**
@@ -27,7 +30,11 @@ class PrinterConnection
      */
     public function session(string $host, int $port, Closure $callback, int $connectTimeout = 5, ?int $writeTimeout = null): mixed
     {
-        $socket = @fsockopen($host, $port, $errno, $errstr, $connectTimeout);
+        // A closure with references, not an arrow function: fsockopen reports why
+        // it failed through those two, and an arrow function captures by value.
+        $socket = $this->quietly(function () use ($host, $port, &$errno, &$errstr, $connectTimeout) {
+            return fsockopen($host, $port, $errno, $errstr, $connectTimeout);
+        });
 
         if ($socket === false) {
             throw new PrinterException("Connessione a {$host}:{$port} fallita: {$errstr} ({$errno}).");

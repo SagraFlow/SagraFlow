@@ -4,6 +4,7 @@ namespace App\Printing;
 
 use App\Enums\PrinterStatus;
 use App\Exceptions\PrinterException;
+use App\Printing\Concerns\QuietSockets;
 
 /**
  * An open connection to a printer: transmits documents and reads the printer's
@@ -14,6 +15,8 @@ use App\Exceptions\PrinterException;
  */
 class PrinterSession
 {
+    use QuietSockets;
+
     /**
      * @param  resource  $socket
      */
@@ -60,7 +63,7 @@ class PrinterSession
         $total = strlen($data);
 
         for ($written = 0; $written < $total;) {
-            $chunk = @fwrite($this->socket, substr($data, $written));
+            $chunk = $this->quietly(fn () => fwrite($this->socket, substr($data, $written)));
 
             // No progress within the timeout: the printer stopped taking data.
             if ($chunk === false || $chunk === 0) {
@@ -80,14 +83,14 @@ class PrinterSession
     {
         stream_set_timeout($this->socket, 0, $readTimeoutMs * 1000);
 
-        if (@fwrite($this->socket, $command) === false) {
+        if ($this->quietly(fn () => fwrite($this->socket, $command)) === false) {
             return '';
         }
 
         $buffer = '';
 
         while (strlen($buffer) < $maxBytes) {
-            $chunk = @fread($this->socket, $maxBytes - strlen($buffer));
+            $chunk = $this->quietly(fn () => fread($this->socket, $maxBytes - strlen($buffer)));
 
             if ($chunk === false || $chunk === '') {
                 break;
@@ -106,11 +109,11 @@ class PrinterSession
      */
     private function query(int $n): ?int
     {
-        if (@fwrite($this->socket, "\x10\x04".chr($n)) === false) {
+        if ($this->quietly(fn () => fwrite($this->socket, "\x10\x04".chr($n))) === false) {
             return null;
         }
 
-        $response = @fread($this->socket, 1);
+        $response = $this->quietly(fn () => fread($this->socket, 1));
 
         if ($response === false || $response === '') {
             return null;
