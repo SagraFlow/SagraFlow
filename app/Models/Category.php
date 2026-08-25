@@ -15,6 +15,7 @@ class Category extends Model
 
     /** @use HasFactory<CategoryFactory> */
     use HasFactory;
+
     use NormalizesName;
 
     protected $fillable = ['name', 'position', 'active'];
