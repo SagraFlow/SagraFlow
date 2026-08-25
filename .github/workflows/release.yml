@@ -5,7 +5,11 @@ on:
         tags: ['v*']
 
 env:
-    IMAGE: ghcr.io/${{ github.repository }}
+    # ghcr.io only accepts a lowercase repository name, and github.repository
+    # keeps the case the repository was created with (SagraFlow/SagraFlow).
+    # There is no lowercase function in workflow expressions, so every job that
+    # names the image lowercases it in shell first.
+    REPOSITORY: ${{ github.repository }}
 
 jobs:
     # A tag that publishes a broken image is worse than no pipeline at all, so
@@ -34,6 +38,9 @@ jobs:
                       runner: ubuntu-24.04-arm
         steps:
             - uses: actions/checkout@v5
+
+            - name: Work out the image name
+              run: echo "IMAGE=ghcr.io/$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
             - uses: docker/setup-buildx-action@v3
 
@@ -85,6 +92,9 @@ jobs:
             contents: write
             packages: write
         steps:
+            - name: Work out the image name
+              run: echo "IMAGE=ghcr.io/$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
             - uses: actions/download-artifact@v4
               with:
                   pattern: digest-*
