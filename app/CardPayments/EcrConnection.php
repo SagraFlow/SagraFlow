@@ -14,10 +14,13 @@ use Closure;
  * One conversation with a terminal over TCP: we open the connection, send a
  * message, and read until its answer arrives.
  *
- * The two timeouts are separate on purpose. Reaching the terminal either works
- * in a moment or not at all, while an answer can take minutes - a card looked
- * for in a wallet, a PIN typed twice - and the wait is only bounded so that a
- * terminal which never replies does not hold the till forever.
+ * The two timeouts are separate on purpose. Opening the connection is given
+ * room because the terminals are on wifi and their radio wakes from sleep: a
+ * till goes minutes between one customer and the next, and opens measured on
+ * this network reached three seconds with the hall still empty. An answer can
+ * take minutes of its own - a card looked for in a wallet, a PIN typed twice -
+ * and that wait is only bounded so that a terminal which never replies does not
+ * hold the till forever.
  */
 class EcrConnection
 {
@@ -46,7 +49,7 @@ class EcrConnection
         string $host,
         int $port,
         string $payload,
-        int $connectTimeout = 5,
+        int $connectTimeout = 10,
         int $readTimeout = 180,
         ?Closure $onProgress = null,
         int $attempts = self::MAX_ATTEMPTS,
@@ -93,6 +96,7 @@ class EcrConnection
     protected function listen($socket, int $readTimeout, ?Closure $onProgress): DecodedFrame
     {
         $buffer = '';
+        $heard = false;
         $deadline = microtime(true) + $readTimeout;
 
         while (microtime(true) < $deadline) {
@@ -102,16 +106,17 @@ class EcrConnection
                 $info = stream_get_meta_data($socket);
 
                 if ($info['timed_out'] ?? false) {
-                    throw new EcrProtocolException('Il terminale non ha risposto entro il tempo massimo.');
+                    throw $this->unanswered($heard, 'Il terminale non ha risposto entro il tempo massimo.');
                 }
 
                 if (feof($socket)) {
-                    throw new EcrProtocolException('Il terminale ha chiuso la connessione senza rispondere.');
+                    throw $this->unanswered($heard, 'Il terminale ha chiuso la connessione senza rispondere.');
                 }
 
                 continue;
             }
 
+            $heard = true;
             $buffer .= $chunk;
 
             while (($read = EcrFrame::read($buffer)) !== null) {
@@ -139,6 +144,26 @@ class EcrConnection
             }
         }
 
-        throw new EcrProtocolException('Il terminale non ha risposto entro il tempo massimo.');
+        throw $this->unanswered($heard, 'Il terminale non ha risposto entro il tempo massimo.');
+    }
+
+    /**
+     * Which of the two failures a wait without an answer is.
+     *
+     * A terminal that said nothing at all never took the message: no
+     * acknowledgement, no line for the customer, not a byte. Nothing was
+     * processed, therefore nothing was charged, and the till can say so and move
+     * on. One that spoke first may have gone on to charge the card whatever
+     * happened to the line afterwards, and that is the question only the person
+     * holding the terminal can answer.
+     *
+     * The doubt is kept on the slightest evidence on purpose: the mistake that
+     * costs money is calling an attempt harmless when it was not.
+     */
+    protected function unanswered(bool $heard, string $message): EcrProtocolException
+    {
+        return $heard
+            ? new EcrProtocolException($message)
+            : new EcrUnsentException('Il terminale non ha preso il messaggio: nessun importo è stato inviato.');
     }
 }

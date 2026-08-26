@@ -27,7 +27,9 @@ class PaymentRunner
      * Below the job's own timeout on purpose, so that a terminal which never
      * answers is closed by this code - which knows whether the message left -
      * rather than by a worker being killed mid-wait. The chain reads:
-     * this (120) < job (150) < supervisor (180) < the queue's retry_after (300).
+     * this (120) < job (150) < supervisor (180) < the queue's retry_after (300),
+     * and the ten seconds allowed for opening the connection sit on top of the
+     * first number, which is what the twenty to spare underneath the job are for.
      */
     public const RESPONSE_TIMEOUT = 120;
 

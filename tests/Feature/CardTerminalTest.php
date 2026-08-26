@@ -162,7 +162,7 @@ function probeAnswering(Closure $answer): TerminalProbe
             parent::__construct();
         }
 
-        public function request(string $host, int $port, string $payload, int $connectTimeout = 5, int $readTimeout = 180, ?Closure $onProgress = null, int $attempts = self::MAX_ATTEMPTS): string
+        public function request(string $host, int $port, string $payload, int $connectTimeout = 10, int $readTimeout = 180, ?Closure $onProgress = null, int $attempts = self::MAX_ATTEMPTS): string
         {
             return ($this->answer)($payload);
         }

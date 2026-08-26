@@ -30,7 +30,7 @@ class FakeEcrConnection extends EcrConnection
         string $host,
         int $port,
         string $payload,
-        int $connectTimeout = 5,
+        int $connectTimeout = 10,
         int $readTimeout = 180,
         ?Closure $onProgress = null,
         int $attempts = self::MAX_ATTEMPTS,

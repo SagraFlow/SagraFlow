@@ -5,6 +5,7 @@ use App\CardPayments\Protocol\DecodedFrame;
 use App\CardPayments\Protocol\EcrFrame;
 use App\CardPayments\Protocol\EcrFrameType;
 use App\Exceptions\EcrProtocolException;
+use App\Exceptions\EcrUnsentException;
 
 /** A stream holding what the terminal would have said, ready to be read. */
 function terminalSaying(string $bytes)
@@ -73,8 +74,31 @@ it('reports a refusal of the message itself, so it can be sent again', function 
 });
 
 it('does not pretend an answer arrived when the line went quiet', function () {
+    // Not an acknowledgement, not a line for the customer, not a byte: the
+    // terminal never took the message, so the till may say plainly that nobody
+    // was charged instead of sending someone to go and look.
     listenOn(terminalSaying(''));
-})->throws(EcrProtocolException::class);
+})->throws(EcrUnsentException::class);
+
+it('keeps the doubt when the terminal spoke before going quiet', function (string $said) {
+    $thrown = null;
+
+    try {
+        listenOn(terminalSaying($said));
+    } catch (EcrProtocolException $exception) {
+        $thrown = $exception;
+    }
+
+    // It answered something, so it had the message. Whatever became of the line
+    // afterwards, the card may have been charged, and that is a question for
+    // whoever is holding the terminal.
+    expect($thrown)->toBeInstanceOf(EcrProtocolException::class)
+        ->and($thrown)->not->toBeInstanceOf(EcrUnsentException::class);
+})->with([
+    'an acknowledgement' => EcrFrame::ack(),
+    'a line for the customer' => chr(0x01).'INSERIRE CARTA      '.chr(0x04),
+    'half an answer' => "\x02".'00099887',
+]);
 
 it('does not mistake half an answer for a whole one', function () {
     $whole = EcrFrame::encode('00099887'.'0'.'E'.'00');
