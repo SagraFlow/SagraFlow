@@ -998,7 +998,7 @@ new #[Layout('components.layouts.app')] #[Title('Cassa')] class extends Componen
         session()->invalidate();
         session()->regenerateToken();
 
-        return $this->redirect(route('filament.admin.auth.login'), navigate: false);
+        return $this->redirect(route('login'), navigate: false);
     }
 
     /**

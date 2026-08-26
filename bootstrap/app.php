@@ -36,8 +36,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
     })
     ->withMiddleware(function (Middleware $middleware): void {
-        // Reuse the Filament panel login for guarded web pages (e.g. the POS).
-        $middleware->redirectGuestsTo(fn () => route('filament.admin.auth.login'));
+        // Guarded web pages (the POS) send their guests to the till's own
+        // sign-in, never to the panel's: Filament will not authenticate anyone
+        // who could not open the panel afterwards, which is every cashier.
+        $middleware->redirectGuestsTo(fn () => route('login'));
+
+        // And a tablet that is already signed in, landing on that form, goes
+        // straight through to the till rather than to the welcome page.
+        $middleware->redirectUsersTo(fn () => route('pos'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
@@ -45,12 +51,12 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         // A till account that lands in the panel is taken to the till instead of
-        // being met by a forbidden page. That is the path a cashier walks every
-        // time the tablet is logged out, because the sign-in form is the panel's
-        // own. Handled here rather than with middleware: what runs before the
-        // panel's guard is decided by the framework's priority list, not by the
-        // order of the panel's middleware array, and anything unknown to that
-        // list runs last - after the guard has already refused.
+        // being met by a forbidden page: a bookmark kept from another tablet, an
+        // address typed by hand, a link followed by mistake. Handled here rather
+        // than with middleware: what runs before the panel's guard is decided by
+        // the framework's priority list, not by the order of the panel's
+        // middleware array, and anything unknown to that list runs last - after
+        // the guard has already refused.
         $exceptions->render(function (HttpExceptionInterface $e, Request $request): ?RedirectResponse {
             $user = $request->user();
 

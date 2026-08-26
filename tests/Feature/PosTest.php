@@ -510,7 +510,7 @@ it('logs the operator out', function () {
 
     Livewire::test('pages::pos')
         ->call('logout')
-        ->assertRedirect(route('filament.admin.auth.login'));
+        ->assertRedirect(route('login'));
 
     expect(auth()->check())->toBeFalse();
 });
