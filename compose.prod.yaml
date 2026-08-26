@@ -3,7 +3,11 @@
 # there is deliberately no build step and no source directory, because the code
 # lives inside the published image.
 #
-#   curl -O https://raw.githubusercontent.com/SagraFlow/SagraFlow/v0.1.0/compose.prod.yaml
+#   curl -o docker-compose.yaml https://raw.githubusercontent.com/SagraFlow/SagraFlow/v0.1.0/compose.prod.yaml
+#
+# Saved under the name Docker looks for on its own, so every command on that
+# machine is a plain `docker compose ...` with no file to name. Here it keeps the
+# longer name, to sit beside the development one without replacing it.
 #
 # Take it from the tag you are running: a compose file from another day can be
 # missing a service or a variable and say nothing about it.
