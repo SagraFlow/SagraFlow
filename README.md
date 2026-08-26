@@ -68,7 +68,7 @@ mkdir sagraflow && cd sagraflow
 
 # The release to install. The newest one is at
 # https://github.com/SagraFlow/SagraFlow/releases
-TAG=v0.1.0
+TAG=v0.1.1
 
 curl -o docker-compose.yaml https://raw.githubusercontent.com/SagraFlow/SagraFlow/$TAG/compose.prod.yaml
 curl -o .env https://raw.githubusercontent.com/SagraFlow/SagraFlow/$TAG/.env.production.example
@@ -141,7 +141,7 @@ Name the release once, put it in `SAGRAFLOW_TAG` in `.env`, take the compose fil
 of that tag over the one you have, and bring it up.
 
 ```bash
-TAG=v0.1.0   # the release you are moving to
+TAG=v0.1.1   # the release you are moving to
 
 curl -o docker-compose.yaml https://raw.githubusercontent.com/SagraFlow/SagraFlow/$TAG/compose.prod.yaml
 docker compose pull
