@@ -81,4 +81,4 @@ new #[Layout('components.layouts.app')] #[Title('Accedi')] class extends Compone
     {
         return Str::transliterate(Str::lower($this->email).'|'.request()->ip());
     }
-}
+};
